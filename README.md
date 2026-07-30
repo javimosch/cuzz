@@ -175,3 +175,9 @@ REST + an agent-first CLI. Conventions from [cli-specs](https://cli-specs.intran
 ## Licence
 
 MIT
+
+## Live
+
+A relay runs for the am-fleet at **https://cuzz.intrane.fr** — `cuzz serve` on the
+fleet host, proxied by Traefik. `GET /health` and `GET /guide` are open; everything
+else needs a token.

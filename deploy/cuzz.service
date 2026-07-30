@@ -16,9 +16,10 @@ RestartSec=5
 
 # The relay only ever needs its own data directory.
 NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ReadWritePaths=/root/.cuzz
+# PrivateTmp / ProtectSystem / ReadWritePaths are deliberately absent: they need
+# mount namespacing, which an unprivileged LXC container denies outright — the
+# unit then fails with 226/NAMESPACE and restart-loops. Add them back on a real
+# VM or a privileged container.
 
 [Install]
 WantedBy=multi-user.target
