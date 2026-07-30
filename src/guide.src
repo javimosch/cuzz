@@ -25,7 +25,7 @@ func guide_json() (s) {
         ",\"paging\":\"there is no cursor: read with --since <watermark> and a --limit. A reply shorter than the limit means you are caught up.\"" +
         ",\"not\":[\"not Nostr-compatible — no keypairs, no federation\",\"no threads, reactions, or DMs\",\"not a workflow engine — no triggers or approvals; systemd and shell scripts orchestrate\",\"not multi-tenant — one relay, one fleet\",\"does not know about GitHub; PR numbers are just text in a message\"]" +
         ",\"exit_codes\":{\"0\":\"ok\",\"80-89\":\"your input or auth\",\"90-99\":\"resource (db unwritable)\",\"100-109\":\"integration (relay unreachable) — retryable\",\"110-119\":\"internal\"}" +
-        ",\"discover\":{\"guide\":\"/guide\",\"llms\":\"/llms.txt\",\"health\":\"/health\",\"chat\":\"/\",\"api\":\"/api/messages, /api/channels\",\"sse\":\"/events?channel=<name>\"}" +
+        ",\"discover\":{\"guide\":\"/guide\",\"llms\":\"/llms.txt\",\"health\":\"/health\",\"chat\":\"/\",\"api\":\"/api/messages, /api/channels, /api/tokens (admin)\",\"sse\":\"/events?channel=<name>\"}" +
         "}"
 }
 
@@ -42,6 +42,8 @@ func llms_txt() (s) {
         "- `POST /api/messages` — `{\"channel\":\"am-fleet\",\"kind\":\"status\",\"content\":\"...\",\"reply_to\":\"\"}`.\n" +
         "  The author comes from the token unless the body names one.\n" +
         "- `GET /api/channels` / `POST /api/channels` `{\"name\":\"...\"}` (admin token).\n" +
+        "- `GET /api/tokens` / `POST /api/tokens` `{\"agent\":\"...\",\"role\":\"editor|admin\"}` (admin token).\n" +
+        "  Minting is idempotent per agent name: the same agent always gets the same token back.\n" +
         "- `GET /events?channel=<name>` — server-sent events, one `data:` line of message JSON each.\n" +
         "- `GET /health`, `GET /guide`, `GET /llms.txt` — unauthenticated.\n\n" +
         "## Kinds\n\n" +
@@ -73,7 +75,7 @@ func cmd_guide(args) {
 func cmd_help_json() {
     println("{\"tool\":\"cuzz\",\"version\":\"" + cuzz_version() + "\",\"commands\":[" +
         "{\"name\":\"init\",\"summary\":\"create the database, the default channels and the tokens\",\"flags\":[\"--agents <csv>\"]}," +
-        "{\"name\":\"token\",\"summary\":\"mint or show an agent bearer token\",\"flags\":[\"--agent <name>\",\"--role admin|editor\",\"--list\"]}," +
+        "{\"name\":\"token\",\"summary\":\"mint or show an agent bearer token (over HTTP; needs an admin credential)\",\"flags\":[\"--agent <name>\",\"--role admin|editor\",\"--list\",\"--local\"]}," +
         "{\"name\":\"send\",\"summary\":\"append a message to a channel\",\"flags\":[\"--channel\",\"--kind\",\"--content\",\"--author\",\"--reply-to\",\"--local\"]}," +
         "{\"name\":\"get\",\"summary\":\"read messages, oldest first, with a resumable watermark\",\"flags\":[\"--channel\",\"--kind\",\"--since\",\"--limit\",\"--local\"]}," +
         "{\"name\":\"search\",\"summary\":\"case-insensitive substring search over message content\",\"flags\":[\"--query\",\"--channel\",\"--limit\"]}," +

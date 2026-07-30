@@ -91,6 +91,17 @@ is "an editor token cannot create a channel" "$(curl -s -o /dev/null -w '%{http_
 is "an admin token can create a channel" "$(curl -s -o /dev/null -w '%{http_code}' -X POST "localhost:$PORT/api/channels" -H "Authorization: Bearer $CUZZ_PASSWORD" -H 'Content-Type: application/json' -d '{"name":"adminmade"}')" "201"
 is "a newline survives the JSON round trip" "$(curl -s -X POST "localhost:$PORT/api/messages" -H "Authorization: Bearer $CUZZ_PASSWORD" -H 'Content-Type: application/json' -d '{"channel":"am-fleet","content":"line1\nline2"}' | jq_ data.content | wc -l)" "2"
 
+is "an editor token cannot mint a token" "$(curl -s -o /dev/null -w '%{http_code}' -X POST "localhost:$PORT/api/tokens" -H "Authorization: Bearer $AGENT_TOK" -H 'Content-Type: application/json' -d '{"agent":"sneaky"}')" "403"
+is "an editor token cannot list tokens" "$(curl -s -o /dev/null -w '%{http_code}' "localhost:$PORT/api/tokens" -H "Authorization: Bearer $AGENT_TOK")" "403"
+is "an admin mints a token over HTTP" "$(curl -s -X POST "localhost:$PORT/api/tokens" -H "Authorization: Bearer $CUZZ_PASSWORD" -H 'Content-Type: application/json' -d '{"agent":"supervisor","role":"editor"}' | jq_ data.created)" "1"
+is "minting is idempotent per agent" "$(curl -s -X POST "localhost:$PORT/api/tokens" -H "Authorization: Bearer $CUZZ_PASSWORD" -H 'Content-Type: application/json' -d '{"agent":"supervisor","role":"editor"}' | jq_ data.created)" "0"
+is "the re-minted token is the same one" "$(curl -s -X POST "localhost:$PORT/api/tokens" -H "Authorization: Bearer $CUZZ_PASSWORD" -H 'Content-Type: application/json' -d '{"agent":"supervisor"}' | jq_ data.token)" "$(curl -s -X POST "localhost:$PORT/api/tokens" -H "Authorization: Bearer $CUZZ_PASSWORD" -H 'Content-Type: application/json' -d '{"agent":"supervisor"}' | jq_ data.token)"
+is "a bad agent name is refused" "$(curl -s -o /dev/null -w '%{http_code}' -X POST "localhost:$PORT/api/tokens" -H "Authorization: Bearer $CUZZ_PASSWORD" -H 'Content-Type: application/json' -d '{"agent":"BAD NAME"}')" "400"
+is "a bad role is refused" "$(curl -s -o /dev/null -w '%{http_code}' -X POST "localhost:$PORT/api/tokens" -H "Authorization: Bearer $CUZZ_PASSWORD" -H 'Content-Type: application/json' -d '{"agent":"ok","role":"root"}')" "400"
+is "listing tokens never echoes a secret" "$(curl -s "localhost:$PORT/api/tokens" -H "Authorization: Bearer $CUZZ_PASSWORD" | grep -c "$AGENT_TOK")" "0"
+is "the CLI mints over HTTP" "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" token --agent glm-supervisor | jq_ data.agent)" "glm-supervisor"
+is "a minted token actually works" "$(TOK=$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" token --agent glm-supervisor | jq_ data.token); curl -s "localhost:$PORT/api/whoami" -H "Authorization: Bearer $TOK" | jq_ data.agent)" "glm-supervisor"
+
 # a relay that is not running must say so, with a retryable code
 ( unset CUZZ_TOKEN; CUZZ_URL=http://127.0.0.1:1 "$CUZZ" get -c am-fleet >/dev/null 2>&1 )
 is "an unreachable relay exits 100" "$?" "100"

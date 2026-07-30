@@ -70,24 +70,17 @@ func cmd_init(args) {
     chan_create("hitl")
 
     minted := []string{}
-    admin, afound := tok_for_agent("admin")
-    if afound == 0 {
-        admin = tok_new("ca_")
-        if tok_put(admin, "admin", "admin") == 0 {
-            out_err(110, "internal", "could not store the admin token", "")
-        }
-    }
+    admin, _, acode, amsg := tok_mint("admin", "admin")
+    if acode > 0 { out_err(110, "internal", amsg, "") }
     names := split(flag_get(fs, "agents"), ",")
     i := 0
     while i < len(names) {
         nm := trim(names[i])
-        if len(nm) > 0 && valid_name(nm) == 1 {
-            t, found := tok_for_agent(nm)
-            if found == 0 {
-                t = tok_new("ct_")
-                tok_put(t, nm, "editor")
+        if len(nm) > 0 {
+            t, _, ncode, _ := tok_mint(nm, "editor")
+            if ncode == 0 {
+                minted = append(minted, "{\"agent\":\"" + nm + "\",\"token\":\"" + t + "\"}")
             }
-            minted = append(minted, "{\"agent\":\"" + nm + "\",\"token\":\"" + t + "\"}")
         }
         i = i + 1
     }
@@ -100,23 +93,30 @@ func cmd_token(args) {
     fs = flag_str(fs, "agent", "a", "", "agent name")
     fs = flag_str(fs, "role", "r", "editor", "admin or editor")
     fs = flag_bool(fs, "list", "l", "list agents and token prefixes instead of minting")
+    fs = flag_bool(fs, "local", "", "write straight to the grange file instead of the relay")
     fs = parse_flags(fs, args)
 
-    if flag_on(fs, "list") { out_ok(tok_list()) }
+    // Minting goes over HTTP for the same reason sending does: the relay owns the
+    // database file, so a CLI that opened it to add a token would be a second
+    // writer underneath a live server. Needs an admin credential — CUZZ_TOKEN set
+    // to an admin token, or CUZZ_PASSWORD.
+    local := 0
+    if flag_on(fs, "local") || cli_local() == 1 { local = 1 }
+
+    if flag_on(fs, "list") {
+        if local == 1 { out_ok(tok_list()) }
+        out_ok(http_call("GET", "/api/tokens", ""))
+    }
     agent := flag_get(fs, "agent")
     if len(agent) == 0 { out_err(80, "input", "--agent is required", "cuzz token --agent merger") }
-    if valid_name(agent) == 0 { out_err(80, "input", "invalid agent name: " + agent, "use a-z 0-9 - _") }
     role := flag_get(fs, "role")
-    if role != "admin" && role != "editor" { out_err(80, "input", "--role must be admin or editor", "") }
 
-    t, found := tok_for_agent(agent)
-    if found == 1 {
-        out_ok("{\"agent\":\"" + agent + "\",\"token\":\"" + t + "\",\"created\":false}")
+    if local == 1 {
+        t, _, code, msg := tok_mint(agent, role)
+        if code > 0 { out_err(code, "input", msg, "") }
+        out_ok("{\"agent\":\"" + agent + "\",\"token\":\"" + t + "\",\"role\":\"" + role + "\"}")
     }
-    t = tok_new("ct_")
-    if role == "admin" { t = tok_new("ca_") }
-    if tok_put(t, agent, role) == 0 { out_err(110, "internal", "could not store token", "") }
-    out_ok("{\"agent\":\"" + agent + "\",\"token\":\"" + t + "\",\"role\":\"" + role + "\",\"created\":true}")
+    out_ok(http_call("POST", "/api/tokens", "{\"agent\":\"" + jesc_c(agent) + "\",\"role\":\"" + jesc_c(role) + "\"}"))
 }
 
 // ---- send ----

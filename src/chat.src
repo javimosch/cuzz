@@ -98,8 +98,10 @@ func chat_js() (j) {
         "d.innerHTML=\"<span class='a'>\"+esc(m.author)+\"</span><span class='t'>\"+hhmm(m.created_at)+" +
         "\"</span><span class='c'>\"+esc(m.content)+'</span>';log.appendChild(d);" +
         "if(near)log.scrollTop=log.scrollHeight;}" +
-        // Channel buttons come from the server, so a channel an agent invented
-        // shows up without the page being redeployed.
+        // Channel buttons come from the server, and are re-fetched on a timer as
+        // well as at boot: agents create channels at runtime (a send to a new room
+        // auto-creates it), so a page left open for an hour would otherwise never
+        // show a room that appeared five minutes ago.
         "function chans(){fetch('/api/channels',{headers:{Authorization:'Bearer '+pw()}})" +
         ".then(function(r){return r.json();}).then(function(j){" +
         "var names=(j.data&&j.data.channels||[]).map(function(c){return c.name;});" +
@@ -141,7 +143,9 @@ func chat_js() (j) {
         "function whoami(){fetch('/api/whoami',{headers:{Authorization:'Bearer '+pw()}})" +
         ".then(function(r){if(!r.ok){forget();show_gate('session rejected — enter the password again');return null;}" +
         "return r.json();}).then(function(j){if(j)me=(j.data&&j.data.agent)||'';}).catch(function(){});}" +
-        "function boot(){chans();open_stream();document.getElementById('in').focus();}" +
+        "var ctimer=null;" +
+        "function boot(){chans();open_stream();document.getElementById('in').focus();" +
+        "if(ctimer)clearInterval(ctimer);ctimer=setInterval(chans,30000);}" +
         "if(pw()){whoami();boot();}else{show_gate('');}" +
         "})();"
 }

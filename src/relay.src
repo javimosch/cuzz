@@ -217,6 +217,37 @@ func tok_list() (data) {
     data = "{\"count\":" + str(len(out)) + ",\"tokens\":[" + join(out, ",") + "]}"
 }
 
+// tok_mint is idempotent per agent name: an agent that already has a token gets
+// the same one back rather than a second valid credential nobody tracks.
+// Returns (token, created, errcode, errmsg).
+func tok_mint(agent, role) (token, created, errcode, errmsg) {
+    token = ""
+    created = 0
+    errcode = 0
+    errmsg = ""
+    if valid_name(agent) == 0 {
+        errcode = 80
+        errmsg = "invalid agent name (use a-z 0-9 - _, max 40 chars): " + agent
+        return
+    }
+    if role != "admin" && role != "editor" {
+        errcode = 80
+        errmsg = "role must be admin or editor, got: " + role
+        return
+    }
+    t, found := tok_for_agent(agent)
+    if found == 1 { token = t  return }
+    t = tok_new("ct_")
+    if role == "admin" { t = tok_new("ca_") }
+    if tok_put(t, agent, role) == 0 {
+        errcode = 110
+        errmsg = "could not store the token"
+        return
+    }
+    token = t
+    created = 1
+}
+
 func tok_for_agent(agent) (token, found) {
     token = ""
     found = 0

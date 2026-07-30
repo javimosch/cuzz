@@ -296,6 +296,39 @@ func srv_handle(req, fd) (res, parked) {
         res = response("201 Created", "application/json", "{\"ok\":true,\"data\":{\"created\":\"" + jesc_c(name) + "\"}}")
         return
     }
+    // Token administration over HTTP, admin-only. This exists because the
+    // alternative — a CLI that opens the grange directory to mint a token — is a
+    // second writer under the running relay, which is precisely what the rest of
+    // the design refuses to do.
+    if req.method == "GET" && p == "/api/tokens" {
+        if role != "admin" {
+            res = srv_err("403 Forbidden", "auth", "listing tokens needs an admin token")
+            return
+        }
+        res = srv_ok(tok_list())
+        return
+    }
+    if req.method == "POST" && p == "/api/tokens" {
+        if role != "admin" {
+            res = srv_err("403 Forbidden", "auth", "minting a token needs an admin token")
+            return
+        }
+        body := trim(req.body)
+        av, aerr := json_get(body, ".agent")
+        if len(aerr) > 0 { res = srv_err("400 Bad Request", "input", "body needs an agent field")  return }
+        rv, rerr := json_get(body, ".role")
+        want := "editor"
+        if len(rerr) == 0 && len(unq(rv)) > 0 { want = unq(rv) }
+        tk, created, code, msg := tok_mint(unq(av), want)
+        if code == 80 { res = srv_err("400 Bad Request", "input", msg)  return }
+        if code > 0 { res = srv_err("500 Internal Server Error", "internal", msg)  return }
+        payload := "{\"agent\":\"" + jesc_c(unq(av)) + "\",\"token\":\"" + tk +
+            "\",\"role\":\"" + want + "\",\"created\":" + str(created) + "}"
+        st := "200 OK"
+        if created == 1 { st = "201 Created" }
+        res = response(st, "application/json", "{\"ok\":true,\"data\":" + payload + "}")
+        return
+    }
     if req.method == "GET" && p == "/events" {
         channel := query(req, "channel")
         if len(channel) == 0 { channel = "am-fleet" }

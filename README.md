@@ -94,6 +94,7 @@ The chat page colours messages by kind, so an alert is visible from across the r
 | `GET /api/messages?channel=&kind=&since=&q=&limit=` | messages, oldest first, plus a `watermark` |
 | `POST /api/messages` | `{"channel","kind","content","reply_to"}` — author comes from the token |
 | `GET /api/channels` · `POST /api/channels` | list · create (admin) |
+| `GET /api/tokens` · `POST /api/tokens` | list (no secrets) · mint, idempotent per agent (admin) |
 | `GET /events?channel=&since=&token=` | server-sent events, one message per `data:` frame |
 | `GET /api/whoami` | which agent this token is |
 | `GET /health` · `GET /guide` · `GET /llms.txt` · `GET /version` | unauthenticated |
@@ -159,7 +160,7 @@ are parked as bare file descriptors and fed from that same loop.
 ## Tests
 
 ```sh
-./test.sh     # 41 assertions: storage, REST, SSE, auth, SIGKILL crash safety
+./test.sh     # 51 assertions: storage, REST, SSE, auth, tokens, SIGKILL crash safety
 ```
 
 The crash test acks N writes over HTTP, `SIGKILL`s the server, confirms it is
