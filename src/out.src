@@ -1,7 +1,7 @@
 // cuzz — agent-first output contract (cli-output-spec).
 // stdout = data JSON only; stderr = typed errors; exit codes 0 / 80-119.
 
-func cuzz_version() (v) { v = "0.1.5" }
+func cuzz_version() (v) { v = "0.1.6" }
 
 func jesc_c(s) (out) {
     out = replace(s, "\\", "\\\\")

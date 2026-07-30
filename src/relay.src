@@ -348,6 +348,33 @@ func tok_lookup(token) (agent, role) {
     role = unq(rv)
 }
 
+// agent_names lists who can be @-mentioned: every agent that holds a token, plus
+// the operator. Deliberately separate from tok_list — this is readable by any
+// authenticated caller and must never carry a credential.
+func agent_names() (data) {
+    docs := items_docs(st_find("tokens", "", 0))
+    names := []string{}
+    human := env("CUZZ_HUMAN")
+    if len(human) == 0 { human = "human" }
+    names = append(names, "\"" + jesc_c(human) + "\"")
+    i := 0
+    while i < len(docs) {
+        av, aerr := json_get(docs[i], ".agent")
+        if len(aerr) == 0 {
+            nm := unq(av)
+            dup := 0
+            j := 0
+            while j < len(names) {
+                if names[j] == "\"" + nm + "\"" { dup = 1 }
+                j = j + 1
+            }
+            if dup == 0 { names = append(names, "\"" + jesc_c(nm) + "\"") }
+        }
+        i = i + 1
+    }
+    data = "{\"count\":" + str(len(names)) + ",\"agents\":[" + join(names, ",") + "]}"
+}
+
 func tok_list() (data) {
     docs := items_docs(st_find("tokens", "", 0))
     out := []string{}

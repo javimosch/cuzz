@@ -164,6 +164,11 @@ is "untagged messages are excluded"  "$("$CUZZ" get -c mentions-t --mentions reb
 is "mentions_list is there for UI"   "$("$CUZZ" get -c mentions-t -q "both" | jq_ data.messages.0.mentions_list.1)" "merger"
 is "mentions compose with --since"   "$("$CUZZ" get -c mentions-t --mentions merger --since "$("$CUZZ" get -c mentions-t --limit 0 | jq_ data.watermark)" --limit 0 | jq_ data.count)" "0"
 
+is "/api/agents lists mentionables"  "$("$CUZZ" get -c mentions-t --limit 0 >/dev/null; curl -s "localhost:$PORT/api/agents" -H "Authorization: Bearer $AGENT_TOK" | jq_ data.agents.0)" "javi"
+is "/api/agents needs auth"          "$(curl -s -o /dev/null -w '%{http_code}' "localhost:$PORT/api/agents")" "401"
+is "/api/agents leaks no token"      "$(curl -s "localhost:$PORT/api/agents" -H "Authorization: Bearer $AGENT_TOK" | grep -c "$AGENT_TOK")" "0"
+is "an editor may read agents"       "$(curl -s -o /dev/null -w '%{http_code}' "localhost:$PORT/api/agents" -H "Authorization: Bearer $AGENT_TOK")" "200"
+
 # a relay that is not running must say so, with a retryable code
 ( unset CUZZ_TOKEN; CUZZ_URL=http://127.0.0.1:1 "$CUZZ" get -c am-fleet >/dev/null 2>&1 )
 is "an unreachable relay exits 100" "$?" "100"

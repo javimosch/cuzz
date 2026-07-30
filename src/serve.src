@@ -314,6 +314,10 @@ func srv_handle(req, fd) (res, parked) {
         res = srv_ok("{\"deleted\":\"" + jesc_c(mid) + "\"}")
         return
     }
+    if req.method == "GET" && p == "/api/agents" {
+        res = srv_ok(agent_names())
+        return
+    }
     if req.method == "GET" && p == "/api/channels" {
         res = srv_ok(chan_list())
         return
