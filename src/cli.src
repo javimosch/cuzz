@@ -1,0 +1,296 @@
+// cuzz cli — the agent-facing commands.
+//
+// send/get/search default to talking HTTP to `cuzz serve`, not to opening the
+// grange directory. That is not only simpler than a second write path: the
+// running server holds the collection in memory, so a second process appending
+// to the same directory underneath it would be a concurrent writer grange does
+// not promise anything about. `--local` (or CUZZ_LOCAL=1) writes direct, for
+// bootstrapping and for tests with no server up.
+
+func cli_local() (yes) {
+    yes = 0
+    if env("CUZZ_LOCAL") == "1" { yes = 1 }
+}
+
+func cli_token() (t) {
+    t = env("CUZZ_TOKEN")
+    if len(t) == 0 { t = env("CUZZ_PASSWORD") }
+}
+
+// http_call sends an authenticated request to `cuzz serve` and unwraps the
+// {ok,data} envelope. A refused connection is the single most likely failure
+// for an agent, so it gets a named error and a suggestion rather than a status.
+func http_call(method, path, body) (data) {
+    data = ""
+    hdrs := []string{"Content-Type: application/json"}
+    tok := cli_token()
+    if len(tok) > 0 { hdrs = append(hdrs, "Authorization: Bearer " + tok) }
+    status, resp, err := http_request(method, cuzz_url() + path, hdrs, body)
+    if len(err) > 0 {
+        out_err(100, "integration", "cannot reach cuzz at " + cuzz_url() + " (" + err + ")",
+            "start the relay with `cuzz serve`, set CUZZ_URL, or pass --local to use the grange file directly")
+    }
+    if status == 401 || status == 403 {
+        out_err(81, "auth", "rejected by the relay (HTTP " + str(status) + ")",
+            "set CUZZ_TOKEN to an agent token from `cuzz token --agent <name>`")
+    }
+    if status >= 400 {
+        m, merr := json_get(resp, ".error.message")
+        msg := resp
+        if len(merr) == 0 { msg = unq(m) }
+        code := 80
+        if status >= 500 { code = 110 }
+        out_err(code, "request", msg, "")
+    }
+    dv, derr := json_get(resp, ".data")
+    if len(derr) > 0 {
+        out_err(110, "internal", "malformed relay response", "")
+    }
+    data = dv
+}
+
+// ---- init ----
+
+func cmd_init(args) {
+    fs := new_flags("init")
+    fs = flag_str(fs, "agents", "a", "merger,rebaser,escalator,verifier,planner", "comma-separated agent names to mint editor tokens for")
+    fs = parse_flags(fs, args)
+
+    dir := cuzz_db()
+    if mkdir_all(dir) == 0 {
+        out_err(90, "resource", "cannot create db directory " + dir, "check permissions or set CUZZ_DB")
+    }
+    if ensure_schema() == 0 {
+        out_err(110, "internal", "could not declare the grange schema", "")
+    }
+    // Default rooms: the fleet channel and the human-decision channel. Both are
+    // auto-created on first message anyway; creating them up front means a fresh
+    // relay shows the rooms a human expects before any agent has spoken.
+    chan_create("am-fleet")
+    chan_create("hitl")
+
+    minted := []string{}
+    admin, afound := tok_for_agent("admin")
+    if afound == 0 {
+        admin = tok_new("ca_")
+        if tok_put(admin, "admin", "admin") == 0 {
+            out_err(110, "internal", "could not store the admin token", "")
+        }
+    }
+    names := split(flag_get(fs, "agents"), ",")
+    i := 0
+    while i < len(names) {
+        nm := trim(names[i])
+        if len(nm) > 0 && valid_name(nm) == 1 {
+            t, found := tok_for_agent(nm)
+            if found == 0 {
+                t = tok_new("ct_")
+                tok_put(t, nm, "editor")
+            }
+            minted = append(minted, "{\"agent\":\"" + nm + "\",\"token\":\"" + t + "\"}")
+        }
+        i = i + 1
+    }
+    out_ok("{\"db\":\"" + jesc_c(dir) + "\",\"channels\":[\"am-fleet\",\"hitl\"]" +
+        ",\"admin_token\":\"" + admin + "\",\"agents\":[" + join(minted, ",") + "]}")
+}
+
+func cmd_token(args) {
+    fs := new_flags("token")
+    fs = flag_str(fs, "agent", "a", "", "agent name")
+    fs = flag_str(fs, "role", "r", "editor", "admin or editor")
+    fs = flag_bool(fs, "list", "l", "list agents and token prefixes instead of minting")
+    fs = parse_flags(fs, args)
+
+    if flag_on(fs, "list") { out_ok(tok_list()) }
+    agent := flag_get(fs, "agent")
+    if len(agent) == 0 { out_err(80, "input", "--agent is required", "cuzz token --agent merger") }
+    if valid_name(agent) == 0 { out_err(80, "input", "invalid agent name: " + agent, "use a-z 0-9 - _") }
+    role := flag_get(fs, "role")
+    if role != "admin" && role != "editor" { out_err(80, "input", "--role must be admin or editor", "") }
+
+    t, found := tok_for_agent(agent)
+    if found == 1 {
+        out_ok("{\"agent\":\"" + agent + "\",\"token\":\"" + t + "\",\"created\":false}")
+    }
+    t = tok_new("ct_")
+    if role == "admin" { t = tok_new("ca_") }
+    if tok_put(t, agent, role) == 0 { out_err(110, "internal", "could not store token", "") }
+    out_ok("{\"agent\":\"" + agent + "\",\"token\":\"" + t + "\",\"role\":\"" + role + "\",\"created\":true}")
+}
+
+// ---- send ----
+
+func cmd_send(args) {
+    fs := new_flags("send")
+    fs = flag_str(fs, "channel", "c", "am-fleet", "channel to post to")
+    fs = flag_str(fs, "kind", "k", "message", "message|status|alert|action|question|answer|presence")
+    fs = flag_str(fs, "content", "m", "", "the message text")
+    fs = flag_str(fs, "author", "", "", "who is speaking (defaults to the token's agent, or $CUZZ_AGENT)")
+    fs = flag_str(fs, "reply-to", "", "", "id of the message this answers")
+    fs = flag_bool(fs, "local", "", "write straight to the grange file instead of the relay")
+    fs = parse_flags(fs, args)
+
+    content := flag_get(fs, "content")
+    // `cuzz send -c am-fleet "starting #818"` — a bare trailing argument is the
+    // message, because that is how every agent writes it the first time.
+    if len(content) == 0 && len(fs.rest) > 0 { content = join(fs.rest, " ") }
+    if len(content) == 0 {
+        out_err(80, "input", "nothing to send", "cuzz send --channel am-fleet --content \"starting #818\"")
+    }
+    channel := flag_get(fs, "channel")
+    kind := flag_get(fs, "kind")
+    reply := flag_get(fs, "reply-to")
+    author := flag_get(fs, "author")
+    if len(author) == 0 { author = env("CUZZ_AGENT") }
+
+    if flag_on(fs, "local") || cli_local() == 1 {
+        if len(author) == 0 {
+            a, _ := tok_lookup(cli_token())
+            author = a
+        }
+        if len(author) == 0 { author = "cli" }
+        doc, code, msg := msg_append(channel, author, kind, content, reply)
+        if code > 0 { out_err(code, "input", msg, "") }
+        out_ok(doc)
+    }
+    body := "{\"channel\":\"" + jesc_c(channel) + "\",\"kind\":\"" + jesc_c(kind) + "\"" +
+        ",\"content\":\"" + jesc_c(content) + "\",\"reply_to\":\"" + jesc_c(reply) + "\""
+    if len(author) > 0 { body = body + ",\"author\":\"" + jesc_c(author) + "\"" }
+    body = body + "}"
+    out_ok(http_call("POST", "/api/messages", body))
+}
+
+// ---- get / search ----
+
+func get_query(fs) (qs) {
+    qs = "?limit=" + str(flag_int_val(fs, "limit"))
+    ch := flag_get(fs, "channel")
+    if len(ch) > 0 { qs = qs + "&channel=" + url_encode(ch) }
+    k := flag_get(fs, "kind")
+    if len(k) > 0 { qs = qs + "&kind=" + url_encode(k) }
+    s := flag_get(fs, "since")
+    if len(s) > 0 { qs = qs + "&since=" + url_encode(s) }
+    q := flag_get(fs, "query")
+    if len(q) > 0 { qs = qs + "&q=" + url_encode(q) }
+}
+
+func run_read(fs) {
+    limit := flag_int_val(fs, "limit")
+    if limit < 0 { limit = 0 }
+    if flag_on(fs, "local") || cli_local() == 1 {
+        out_ok(msg_query(flag_get(fs, "channel"), flag_get(fs, "kind"),
+            parse_since(flag_get(fs, "since")), flag_get(fs, "query"), limit))
+    }
+    out_ok(http_call("GET", "/api/messages" + get_query(fs), ""))
+}
+
+func read_flags(prog) (fs) {
+    fs = new_flags(prog)
+    fs = flag_str(fs, "channel", "c", "am-fleet", "channel to read (empty for all)")
+    fs = flag_str(fs, "kind", "k", "", "filter by kind")
+    fs = flag_str(fs, "since", "s", "", "only messages after this watermark (ms or RFC-3339)")
+    fs = flag_str(fs, "query", "q", "", "case-insensitive substring of the content")
+    fs = flag_int(fs, "limit", "n", "100", "max messages (0 = no cap)")
+    fs = flag_bool(fs, "local", "", "read the grange file directly instead of the relay")
+}
+
+func cmd_get(args) {
+    fs := parse_flags(read_flags("get"), args)
+    run_read(fs)
+}
+
+func cmd_search(args) {
+    fs := read_flags("search")
+    fs = parse_flags(fs, args)
+    q := flag_get(fs, "query")
+    if len(q) == 0 && len(fs.rest) > 0 { q = join(fs.rest, " ") }
+    if len(q) == 0 { out_err(80, "input", "--query is required", "cuzz search --query rebase") }
+    fs.val["query"] = q
+    // search is fleet-wide unless a channel was named: you search to find where
+    // something was said, which presumes not knowing the room.
+    if flag_get(fs, "channel") == "am-fleet" && contains(join(args, " "), "channel") == false {
+        fs.val["channel"] = ""
+    }
+    run_read(fs)
+}
+
+// ---- channels ----
+
+func cmd_channels(args) {
+    fs := new_flags("channels")
+    fs = flag_str(fs, "create", "", "", "create a channel")
+    fs = flag_bool(fs, "local", "", "use the grange file directly")
+    fs = parse_flags(fs, args)
+
+    name := flag_get(fs, "create")
+    if flag_on(fs, "local") || cli_local() == 1 {
+        if len(name) > 0 {
+            if chan_create(name) == 0 { out_err(80, "input", "invalid channel name: " + name, "use a-z 0-9 - _") }
+            out_ok("{\"created\":\"" + name + "\"}")
+        }
+        out_ok(chan_list())
+    }
+    if len(name) > 0 {
+        out_ok(http_call("POST", "/api/channels", "{\"name\":\"" + jesc_c(name) + "\"}"))
+    }
+    out_ok(http_call("GET", "/api/channels", ""))
+}
+
+// ---- status ----
+
+func cmd_status(args) {
+    fs := new_flags("status")
+    fs = flag_bool(fs, "local", "", "read the grange file directly")
+    fs = parse_flags(fs, args)
+    if flag_on(fs, "local") || cli_local() == 1 {
+        out_ok(status_json())
+    }
+    out_ok(http_call("GET", "/health", ""))
+}
+
+func status_json() (data) {
+    msgs := st_count("messages", "")
+    if msgs < 0 { msgs = 0 }
+    chans := st_count("channels", "")
+    if chans < 0 { chans = 0 }
+    toks := st_count("tokens", "")
+    if toks < 0 { toks = 0 }
+    data = "{\"status\":\"ok\",\"tool\":\"cuzz\",\"version\":\"" + cuzz_version() + "\"" +
+        ",\"db\":\"" + jesc_c(cuzz_db()) + "\",\"messages\":" + str(msgs) +
+        ",\"channels\":" + str(chans) + ",\"tokens\":" + str(toks) +
+        ",\"wal_chunks\":" + str(st_wal_chunks("messages")) + "}"
+}
+
+// ---- watch ----
+// The CLI watcher is a poll loop, not an SSE client: an agent that runs for five
+// minutes and exits wants a watermark it can resume from, and a poll gives it
+// one for free. SSE is for the browser, which has no watermark to keep.
+
+func cmd_watch(args) {
+    fs := read_flags("watch")
+    fs = flag_int(fs, "interval", "i", "2000", "poll interval in ms")
+    fs = parse_flags(fs, args)
+    since := parse_since(flag_get(fs, "since"))
+    every := flag_int_val(fs, "interval")
+    if every < 250 { every = 250 }
+    local := 0
+    if flag_on(fs, "local") || cli_local() == 1 { local = 1 }
+    for {
+        data := ""
+        if local == 1 {
+            data = msg_query(flag_get(fs, "channel"), flag_get(fs, "kind"), since, flag_get(fs, "query"), 0)
+        } else {
+            fs.val["since"] = str(since)
+            fs.val["limit"] = "0"
+            data = http_call("GET", "/api/messages" + get_query(fs), "")
+        }
+        wv, werr := json_get(data, ".watermark")
+        cv, cerr := json_get(data, ".count")
+        if len(cerr) == 0 && parse_int(cv) > 0 {
+            out_ok_keep(data)
+            if len(werr) == 0 && parse_int(wv) > since { since = parse_int(wv) }
+        }
+        sleep(every)
+    }
+}

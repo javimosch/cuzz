@@ -1,0 +1,113 @@
+// cuzz — agent-first output contract (cli-output-spec).
+// stdout = data JSON only; stderr = typed errors; exit codes 0 / 80-119.
+
+func cuzz_version() (v) { v = "0.1.0" }
+
+func jesc_c(s) (out) {
+    out = replace(s, "\\", "\\\\")
+    out = replace(out, "\"", "\\\"")
+    out = replace(out, "\n", "\\n")
+    out = replace(out, "\r", "\\r")
+    out = replace(out, "\t", "\\t")
+}
+
+func eprint(s) { n := write(2, s + "\n") }
+
+func out_ok(dataJson) {
+    println("{\"ok\":true,\"version\":\"" + cuzz_version() + "\",\"data\":" + dataJson + "}")
+    flush()
+    exit(0)
+}
+
+func out_ok_keep(dataJson) {
+    println("{\"ok\":true,\"version\":\"" + cuzz_version() + "\",\"data\":" + dataJson + "}")
+    flush()
+}
+
+// out_err — code 80-89 user, 90-99 resource, 100-109 integration, 110-119 software.
+// Only integration errors are worth a retry, so only they are recoverable.
+func out_err(code, typ, msg, suggestion) {
+    rec := "false"
+    if code >= 100 && code < 110 { rec = "true" }
+    sug := ""
+    if len(suggestion) > 0 { sug = ",\"suggestions\":[\"" + jesc_c(suggestion) + "\"]" }
+    eprint("{\"ok\":false,\"error\":{\"code\":" + str(code) + ",\"type\":\"" + typ + "\",\"message\":\"" + jesc_c(msg) + "\",\"recoverable\":" + rec + sug + "}}")
+    exit(code)
+}
+
+// unq strips the quotes json_get leaves on a JSON string token.
+func unq(s) (r) {
+    r = s
+    if len(s) >= 2 {
+        if substr(s, 0, 1) == "\"" { r = substr(s, 1, len(s) - 1) }
+    }
+}
+
+func cuzz_db() (d) {
+    d = env("CUZZ_DB")
+    if len(d) == 0 { d = env("HOME") + "/.cuzz/cuzz.data" }
+}
+
+func cuzz_url() (u) {
+    u = env("CUZZ_URL")
+    if len(u) == 0 { u = "http://127.0.0.1:7700" }
+}
+
+// mkdir_all creates every missing path segment. grange's own open() mkdirs only
+// the db dir and the collection dir beneath it, so a default of
+// ~/.cuzz/cuzz.data needs the ~/.cuzz parent made here first.
+func mkdir_all(path) (ok) {
+    ok = 0
+    if len(path) == 0 { return }
+    parts := split(path, "/")
+    cur := ""
+    if has_prefix(path, "/") { cur = "" }
+    i := 0
+    while i < len(parts) {
+        if len(parts[i]) > 0 {
+            cur = cur + "/" + parts[i]
+            if has_prefix(path, "/") == false && i == 0 { cur = parts[i] }
+            if is_dir(cur) == false { mkdir(cur) }
+        }
+        i = i + 1
+    }
+    if is_dir(path) { ok = 1 }
+}
+
+// iso_ms renders unix milliseconds as an RFC-3339 UTC stamp. Messages carry
+// both this and the raw ms: humans read the stamp, `--since` ranges on the int
+// (grange's > < operators are numeric, so an ISO string would not compare).
+func iso_ms(ms) (s) {
+    s = time_format_utc(ms / 1000, "%Y-%m-%dT%H:%M:%SZ")
+}
+
+// parse_since accepts either raw milliseconds or an RFC-3339 stamp, because an
+// agent's watermark comes from whichever of the two it happened to keep.
+func parse_since(v) (ms) {
+    ms = 0
+    if len(v) == 0 { return }
+    if contains(v, "T") == false { ms = parse_int(v)  return }
+    y := parse_int(substr(v, 0, 4))
+    mo := parse_int(substr(v, 5, 7))
+    d := parse_int(substr(v, 8, 10))
+    hh := 0
+    mm := 0
+    ss := 0
+    if len(v) >= 19 {
+        hh = parse_int(substr(v, 11, 13))
+        mm = parse_int(substr(v, 14, 16))
+        ss = parse_int(substr(v, 17, 19))
+    }
+    // The stamp is read as UTC, but time_make interprets its fields in the LOCAL
+    // zone, so it lands off by the offset. Add the offset that same instant
+    // reports to get back to UTC. Parsed digit-wise rather than with
+    // parse_int("+0200") so the sign and half-hour zones (+0530) both survive.
+    local := time_make(y, mo, d, hh, mm, ss)
+    zs := time_format(local, "%z")
+    sign := 1
+    if has_prefix(zs, "-") { sign = -1 }
+    if has_prefix(zs, "+") || has_prefix(zs, "-") { zs = substr(zs, 1, len(zs)) }
+    offmin := 0
+    if len(zs) >= 4 { offmin = parse_int(substr(zs, 0, 2)) * 60 + parse_int(substr(zs, 2, 4)) }
+    ms = (local + sign * offmin * 60) * 1000
+}

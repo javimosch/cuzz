@@ -1,0 +1,95 @@
+// cuzz store — thin facade over the embedded grange engine.
+// One db directory; three collections: messages, channels, tokens.
+
+func st_use(coll) (ok) {
+    ok = 0
+    uok, uerr := gr_use(cuzz_db(), coll)
+    if uok == 0 { return }
+    ok = 1
+}
+
+func st_put(coll, id, doc) (ok) {
+    ok = 0
+    if st_use(coll) == 0 { return }
+    gr_put(id, doc)
+    if gr_commit() == 0 { return }
+    ok = 1
+}
+
+func st_get(coll, id) (doc, found) {
+    doc = ""
+    found = 0
+    if st_use(coll) == 0 { return }
+    doc, found = gr_get(id)
+}
+
+func st_del(coll, id) (ok) {
+    ok = 0
+    if st_use(coll) == 0 { return }
+    if gr_del(id) == 0 { return }
+    if gr_commit() == 0 { return }
+    ok = 1
+}
+
+func st_find(coll, where, limit) (data) {
+    data = "{\"count\":0,\"items\":[]}"
+    if st_use(coll) == 0 { return }
+    data = q_find(where, limit)
+}
+
+// st_find_ordered sorts by a range-indexed field. Falls back to the unordered
+// find when the field cannot be ordered on, so a missing index degrades the
+// ordering rather than failing the call.
+func st_find_ordered(coll, where, limit, field, desc) (data) {
+    data = "{\"count\":0,\"items\":[]}"
+    if st_use(coll) == 0 { return }
+    d, ok, why := q_find_ordered(where, limit, field, desc)
+    if ok == 0 { data = q_find(where, limit)  return }
+    data = d
+}
+
+func st_count(coll, where) (n) {
+    n = -1
+    if st_use(coll) == 0 { return }
+    v, err := json_get(q_count(where), ".count")
+    if len(err) == 0 { n = parse_int(v) }
+}
+
+func st_index(coll, field, kind) (ok) {
+    ok = 0
+    if st_use(coll) == 0 { return }
+    ok = gr_index_add(field, "", kind)
+}
+
+// st_seq is grange's per-collection change counter — the SSE fan-out uses it to
+// tell "something was appended" from "nothing happened" without re-querying.
+func st_seq(coll) (n) {
+    n = 0
+    if st_use(coll) == 0 { return }
+    n = g_seq
+}
+
+func st_wal_chunks(coll) (n) {
+    n = 0
+    entries := list_dir(cuzz_db() + "/" + coll)
+    i := 0
+    while i < len(entries) {
+        if has_prefix(entries[i], "wal-") && has_suffix(entries[i], ".grg") { n = n + 1 }
+        i = i + 1
+    }
+}
+
+// items_docs pulls the .doc of every row out of a grange result envelope, so
+// callers hand back plain message objects instead of {id,doc} pairs.
+func items_docs(data) (docs) {
+    docs = []string{}
+    cv, cerr := json_get(data, ".count")
+    if len(cerr) > 0 { return }
+    n := parse_int(cv)
+    i := 0
+    while i < n {
+        dv, derr := json_get(data, ".items[" + str(i) + "].doc")
+        if len(derr) == 0 { docs = append(docs, dv) }
+        i = i + 1
+    }
+}

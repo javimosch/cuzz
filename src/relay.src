@@ -1,0 +1,229 @@
+// cuzz relay — the model. Channels, messages, tokens.
+// Every write and read the CLI and the HTTP server do goes through here, so
+// there is one storage code path however the call arrived.
+
+func kind_name(k) (n) {
+    n = "message"
+    if k == 2 { n = "status" }
+    if k == 3 { n = "alert" }
+    if k == 4 { n = "action" }
+    if k == 5 { n = "question" }
+    if k == 6 { n = "answer" }
+    if k == 7 { n = "presence" }
+}
+
+func kind_num(s) (k) {
+    k = 0
+    if s == "message" || s == "1" { k = 1 }
+    if s == "status" || s == "2" { k = 2 }
+    if s == "alert" || s == "3" { k = 3 }
+    if s == "action" || s == "4" { k = 4 }
+    if s == "question" || s == "5" { k = 5 }
+    if s == "answer" || s == "6" { k = 6 }
+    if s == "presence" || s == "7" { k = 7 }
+}
+
+// valid_name keeps channel and author names to the shape a shell, a URL query
+// and a JSON document all handle without quoting: [a-z0-9_-], <= 40 chars.
+func valid_name(s) (ok) {
+    ok = 0
+    if len(s) == 0 || len(s) > 40 { return }
+    i := 0
+    while i < len(s) {
+        c := charat(s, i)
+        good := 0
+        if c >= "a" && c <= "z" { good = 1 }
+        if c >= "0" && c <= "9" { good = 1 }
+        if c == "-" || c == "_" { good = 1 }
+        if good == 0 { return }
+        i = i + 1
+    }
+    ok = 1
+}
+
+// ---- schema ----
+
+func ensure_schema() (ok) {
+    ok = 0
+    if st_index("messages", "channel", "") == 0 { return }
+    if st_index("messages", "kind", "") == 0 { return }
+    if st_index("messages", "ts", "range") == 0 { return }
+    if st_index("channels", "name", "") == 0 { return }
+    if st_index("tokens", "agent", "") == 0 { return }
+    ok = 1
+}
+
+// ---- channels ----
+
+func chan_exists(name) (yes) {
+    yes = 0
+    _, found := st_get("channels", name)
+    if found == 1 { yes = 1 }
+}
+
+func chan_create(name) (ok) {
+    ok = 0
+    if valid_name(name) == 0 { return }
+    if chan_exists(name) == 1 { ok = 1  return }
+    ms := now_ms()
+    doc := "{\"id\":\"" + name + "\",\"name\":\"" + name + "\",\"ts\":" + str(ms) + ",\"created_at\":\"" + iso_ms(ms) + "\"}"
+    ok = st_put("channels", name, doc)
+}
+
+func chan_list() (data) {
+    docs := items_docs(st_find("channels", "", 0))
+    data = "{\"count\":" + str(len(docs)) + ",\"channels\":[" + join(docs, ",") + "]}"
+}
+
+// ---- messages ----
+
+func msg_id() (id) {
+    id = "msg_" + to_hex(rand_bytes(6))
+}
+
+// msg_append is the single append path. Channels are auto-created on first
+// message: an agent that invents #hitl mid-run should not need a second call,
+// and a typo'd channel is visible in `cuzz channels` rather than silently lost.
+func msg_append(channel, author, kindStr, content, reply_to) (doc, errcode, errmsg) {
+    doc = ""
+    errcode = 0
+    errmsg = ""
+    if valid_name(channel) == 0 {
+        errcode = 80
+        errmsg = "invalid channel name (use a-z 0-9 - _, max 40 chars): " + channel
+        return
+    }
+    if valid_name(author) == 0 {
+        errcode = 80
+        errmsg = "invalid author name (use a-z 0-9 - _, max 40 chars): " + author
+        return
+    }
+    if len(content) == 0 {
+        errcode = 80
+        errmsg = "content is empty"
+        return
+    }
+    if len(content) > 8000 {
+        errcode = 80
+        errmsg = "content exceeds 8000 bytes"
+        return
+    }
+    k := kind_num(kindStr)
+    if k == 0 {
+        errcode = 80
+        errmsg = "unknown kind: " + kindStr + " (message|status|alert|action|question|answer|presence or 1-7)"
+        return
+    }
+    if chan_create(channel) == 0 {
+        errcode = 110
+        errmsg = "could not create channel " + channel
+        return
+    }
+    id := msg_id()
+    ms := now_ms()
+    d := "{\"id\":\"" + id + "\",\"channel\":\"" + channel + "\",\"author\":\"" + author + "\"" +
+        ",\"kind\":" + str(k) + ",\"kind_name\":\"" + kind_name(k) + "\"" +
+        ",\"content\":\"" + jesc_c(content) + "\",\"reply_to\":\"" + jesc_c(reply_to) + "\"" +
+        ",\"ts\":" + str(ms) + ",\"created_at\":\"" + iso_ms(ms) + "\"}"
+    if st_put("messages", id, d) == 0 {
+        errcode = 110
+        errmsg = "write failed"
+        return
+    }
+    doc = d
+}
+
+// msg_query builds a grange where-clause from the filter set. Clauses are
+// ANDed; `channel` and `kind` hit equality indexes, `since` ranges on ts, and
+// `q` is a case-insensitive substring over content.
+func msg_where(channel, kindStr, since, q) (where) {
+    cl := []string{}
+    if len(channel) > 0 { cl = append(cl, "channel=" + channel) }
+    if len(kindStr) > 0 {
+        k := kind_num(kindStr)
+        if k > 0 { cl = append(cl, "kind=" + str(k)) }
+    }
+    if since > 0 { cl = append(cl, "ts>" + str(since)) }
+    if len(q) > 0 { cl = append(cl, "content~=" + q) }
+    where = join(cl, ",")
+}
+
+func msg_query(channel, kindStr, since, q, limit) (data) {
+    where := msg_where(channel, kindStr, since, q)
+    if limit < 0 { limit = 0 }
+    docs := items_docs(st_find_ordered("messages", where, limit, "ts", 0))
+    hi := 0
+    i := 0
+    while i < len(docs) {
+        tv, terr := json_get(docs[i], ".ts")
+        if len(terr) == 0 {
+            t := parse_int(tv)
+            if t > hi { hi = t }
+        }
+        i = i + 1
+    }
+    // `watermark` is what the caller passes back as --since next run: the
+    // highest ts actually returned, not now_ms(), so a message committed
+    // between the query and the reply is not skipped.
+    data = "{\"count\":" + str(len(docs)) + ",\"watermark\":" + str(hi) +
+        ",\"messages\":[" + join(docs, ",") + "]}"
+}
+
+// ---- tokens ----
+// A token is a bearer string mapped to an agent name and a role. "admin" may
+// create channels and mint tokens; "editor" may send and read.
+
+func tok_new(prefix) (t) {
+    t = prefix + to_hex(rand_bytes(16))
+}
+
+func tok_put(token, agent, role) (ok) {
+    ms := now_ms()
+    doc := "{\"token\":\"" + token + "\",\"agent\":\"" + agent + "\",\"role\":\"" + role + "\"" +
+        ",\"ts\":" + str(ms) + ",\"created_at\":\"" + iso_ms(ms) + "\"}"
+    ok = st_put("tokens", token, doc)
+}
+
+// tok_lookup resolves a bearer token to (agent, role). An unknown token yields
+// empty strings — callers must treat that as unauthenticated.
+func tok_lookup(token) (agent, role) {
+    agent = ""
+    role = ""
+    if len(token) == 0 { return }
+    doc, found := st_get("tokens", token)
+    if found == 0 { return }
+    av, aerr := json_get(doc, ".agent")
+    rv, rerr := json_get(doc, ".role")
+    if len(aerr) > 0 || len(rerr) > 0 { return }
+    agent = unq(av)
+    role = unq(rv)
+}
+
+func tok_list() (data) {
+    docs := items_docs(st_find("tokens", "", 0))
+    out := []string{}
+    i := 0
+    while i < len(docs) {
+        // never echo the secret back in a listing
+        av, _ := json_get(docs[i], ".agent")
+        rv, _ := json_get(docs[i], ".role")
+        cv, _ := json_get(docs[i], ".created_at")
+        tv, _ := json_get(docs[i], ".token")
+        hint := unq(tv)
+        if len(hint) > 10 { hint = substr(hint, 0, 10) + "…" }
+        out = append(out, "{\"agent\":" + av + ",\"role\":" + rv + ",\"created_at\":" + cv + ",\"token_prefix\":\"" + hint + "\"}")
+        i = i + 1
+    }
+    data = "{\"count\":" + str(len(out)) + ",\"tokens\":[" + join(out, ",") + "]}"
+}
+
+func tok_for_agent(agent) (token, found) {
+    token = ""
+    found = 0
+    docs := items_docs(st_find("tokens", "agent=" + agent, 1))
+    if len(docs) == 0 { return }
+    tv, terr := json_get(docs[0], ".token")
+    if len(terr) > 0 { return }
+    token = unq(tv)
+    found = 1
+}

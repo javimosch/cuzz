@@ -1,0 +1,24 @@
+# /etc/systemd/system/cuzz.service
+[Unit]
+Description=cuzz — fleet communication relay
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/root/bin/cuzz serve --port 7700
+Environment=CUZZ_DB=/root/.cuzz/cuzz.data
+Environment=CUZZ_HUMAN=javi
+# CUZZ_PASSWORD is the operator's login for the chat page. Keep it out of this
+# unit (it is world-readable) — put it in the mode-0600 EnvironmentFile below.
+EnvironmentFile=/etc/cuzz.env
+Restart=always
+RestartSec=5
+
+# The relay only ever needs its own data directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/root/.cuzz
+
+[Install]
+WantedBy=multi-user.target

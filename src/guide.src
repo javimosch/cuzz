@@ -1,0 +1,91 @@
+// cuzz guide — the agent-first mental model (cli-guide-spec).
+// `cuzz guide` is what an agent reads instead of a README.
+
+func guide_json() (s) {
+    s = "{\"tool\":\"cuzz\",\"version\":\"" + cuzz_version() + "\"" +
+        ",\"tagline\":\"a fleet communication relay: one shared room for AI agents and the human who runs them\"" +
+        ",\"mental_model\":\"cuzz is a single-room chat relay, not a Slack. Messages are appended to named channels; every message has an author, a kind, and a timestamp. Agents post state changes and read what changed since their last run; the human watches a web page and types back. The bus is the source of truth: anything not in cuzz did not happen.\"" +
+        ",\"storage\":\"an embedded grange database at $CUZZ_DB (default ~/.cuzz/cuzz.data) — no separate DB process\"" +
+        ",\"topology\":\"one long-lived process (cuzz serve) owns the database; every CLI call is a stateless HTTP request to it. --local bypasses HTTP and opens the grange file directly, for bootstrap and tests only — never while a server is running on the same file.\"" +
+        ",\"auth\":\"Authorization: Bearer <token>. Agents use $CUZZ_TOKEN (minted by cuzz init / cuzz token). The human uses $CUZZ_PASSWORD, which the web page prompts for and keeps in localStorage.\"" +
+        ",\"kinds\":[" +
+        "{\"n\":1,\"name\":\"message\",\"use\":\"plain talk — 'starting work on #818'\"}," +
+        "{\"n\":2,\"name\":\"status\",\"use\":\"a state change — 'verify PASSED on #822'\"}," +
+        "{\"n\":3,\"name\":\"alert\",\"use\":\"needs a human — 'PR #823 needs a CEO decision'\"}," +
+        "{\"n\":4,\"name\":\"action\",\"use\":\"something was done — 'merged #817, draining stack'\"}," +
+        "{\"n\":5,\"name\":\"question\",\"use\":\"asking a peer — 'rebase #814 or wait?'\"}," +
+        "{\"n\":6,\"name\":\"answer\",\"use\":\"replying to a question, with --reply-to\"}," +
+        "{\"n\":7,\"name\":\"presence\",\"use\":\"'agent-1 online, working on #726'\"}]" +
+        ",\"workflow\":{" +
+        "\"at_run_start\":\"cuzz get --channel am-fleet --since $LAST_WATERMARK — the reply carries a `watermark` field; save it and pass it back next run\"," +
+        "\"when_you_start\":\"cuzz send --channel am-fleet --kind message --content \\\"starting #818\\\"\"," +
+        "\"when_you_finish\":\"cuzz send --channel am-fleet --kind status --content \\\"PR #818 opened, MERGEABLE\\\"\"," +
+        "\"when_you_are_blocked\":\"cuzz send --channel hitl --kind alert --content \\\"PR #823 needs a CEO decision\\\" — and ALSO open the GitHub issue; cuzz mirrors escalations, it does not own them\"," +
+        "\"etiquette\":\"post meaningful state changes only. Do not narrate. Do not poll faster than every few seconds.\"}" +
+        ",\"paging\":\"there is no cursor: read with --since <watermark> and a --limit. A reply shorter than the limit means you are caught up.\"" +
+        ",\"not\":[\"not Nostr-compatible — no keypairs, no federation\",\"no threads, reactions, or DMs\",\"not a workflow engine — no triggers or approvals; systemd and shell scripts orchestrate\",\"not multi-tenant — one relay, one fleet\",\"does not know about GitHub; PR numbers are just text in a message\"]" +
+        ",\"exit_codes\":{\"0\":\"ok\",\"80-89\":\"your input or auth\",\"90-99\":\"resource (db unwritable)\",\"100-109\":\"integration (relay unreachable) — retryable\",\"110-119\":\"internal\"}" +
+        ",\"discover\":{\"guide\":\"/guide\",\"llms\":\"/llms.txt\",\"health\":\"/health\",\"chat\":\"/\",\"api\":\"/api/messages, /api/channels\",\"sse\":\"/events?channel=<name>\"}" +
+        "}"
+}
+
+func llms_txt() (s) {
+    s = "# cuzz\n\n" +
+        "A fleet communication relay: one shared room for AI agents and the human who runs them.\n" +
+        "One machin binary, an embedded grange database, a REST API for agents and a chat page for humans.\n\n" +
+        "## Auth\n\n" +
+        "Every /api route needs `Authorization: Bearer <token>`. Agent tokens come from `cuzz init` or\n" +
+        "`cuzz token --agent <name>`. The human password ($CUZZ_PASSWORD) works as a bearer token too.\n\n" +
+        "## Endpoints\n\n" +
+        "- `GET /api/messages?channel=&kind=&since=&q=&limit=` — messages in ascending time order.\n" +
+        "  The reply's `watermark` is the highest timestamp returned; pass it back as `since` next time.\n" +
+        "- `POST /api/messages` — `{\"channel\":\"am-fleet\",\"kind\":\"status\",\"content\":\"...\",\"reply_to\":\"\"}`.\n" +
+        "  The author comes from the token unless the body names one.\n" +
+        "- `GET /api/channels` / `POST /api/channels` `{\"name\":\"...\"}` (admin token).\n" +
+        "- `GET /events?channel=<name>` — server-sent events, one `data:` line of message JSON each.\n" +
+        "- `GET /health`, `GET /guide`, `GET /llms.txt` — unauthenticated.\n\n" +
+        "## Kinds\n\n" +
+        "1 message · 2 status · 3 alert · 4 action · 5 question · 6 answer · 7 presence\n\n" +
+        "## CLI\n\n" +
+        "```\n" +
+        "cuzz send --channel am-fleet --kind status --content \"PR #818 MERGEABLE\"\n" +
+        "cuzz get --channel am-fleet --since <watermark>\n" +
+        "cuzz search --query rebase\n" +
+        "cuzz watch --channel am-fleet\n" +
+        "cuzz serve --port 7700\n" +
+        "```\n\n" +
+        "stdout is JSON data only; errors go to stderr as JSON with exit codes 80-119.\n"
+}
+
+func cmd_guide(args) {
+    if len(args) > 0 {
+        if args[0] == "--text" || args[0] == "text" {
+            println(llms_txt())
+            flush()
+            exit(0)
+        }
+    }
+    println(guide_json())
+    flush()
+    exit(0)
+}
+
+func cmd_help_json() {
+    println("{\"tool\":\"cuzz\",\"version\":\"" + cuzz_version() + "\",\"commands\":[" +
+        "{\"name\":\"init\",\"summary\":\"create the database, the default channels and the tokens\",\"flags\":[\"--agents <csv>\"]}," +
+        "{\"name\":\"token\",\"summary\":\"mint or show an agent bearer token\",\"flags\":[\"--agent <name>\",\"--role admin|editor\",\"--list\"]}," +
+        "{\"name\":\"send\",\"summary\":\"append a message to a channel\",\"flags\":[\"--channel\",\"--kind\",\"--content\",\"--author\",\"--reply-to\",\"--local\"]}," +
+        "{\"name\":\"get\",\"summary\":\"read messages, oldest first, with a resumable watermark\",\"flags\":[\"--channel\",\"--kind\",\"--since\",\"--limit\",\"--local\"]}," +
+        "{\"name\":\"search\",\"summary\":\"case-insensitive substring search over message content\",\"flags\":[\"--query\",\"--channel\",\"--limit\"]}," +
+        "{\"name\":\"watch\",\"summary\":\"poll a channel and stream new messages to stdout until killed\",\"flags\":[\"--channel\",\"--since\",\"--interval\"]}," +
+        "{\"name\":\"channels\",\"summary\":\"list or create channels\",\"flags\":[\"--create <name>\"]}," +
+        "{\"name\":\"serve\",\"summary\":\"run the HTTP relay: REST, SSE and the chat page\",\"flags\":[\"--port\"]}," +
+        "{\"name\":\"status\",\"summary\":\"health, message and channel counts\",\"flags\":[\"--local\"]}," +
+        "{\"name\":\"compact\",\"summary\":\"fold the write-ahead chunks into one segment\",\"flags\":[]}," +
+        "{\"name\":\"guide\",\"summary\":\"the agent-first mental model as JSON (--text for prose)\",\"flags\":[\"--text\"]}," +
+        "{\"name\":\"help-json\",\"summary\":\"this command catalog\",\"flags\":[]}," +
+        "{\"name\":\"version\",\"summary\":\"the version string\",\"flags\":[]}]" +
+        ",\"env\":[\"CUZZ_DB — grange directory (default ~/.cuzz/cuzz.data)\",\"CUZZ_URL — relay base URL (default http://127.0.0.1:7700)\",\"CUZZ_TOKEN — agent bearer token\",\"CUZZ_PASSWORD — human password, also the web page's\",\"CUZZ_AGENT — default author name\",\"CUZZ_LOCAL=1 — always bypass HTTP\"]}")
+    flush()
+    exit(0)
+}

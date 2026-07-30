@@ -1,0 +1,58 @@
+// cuzz — fleet communication relay. CLI entry.
+
+func usage() {
+    eprint("usage: cuzz <command> [flags]")
+    eprint("commands: init | token | send | get | search | watch | channels | serve | status | compact | guide | help-json | version")
+    eprint("run `cuzz guide` for the agent-first mental model as JSON")
+    exit(80)
+}
+
+func shift(args, n) (out) {
+    out = []string{}
+    i := n
+    while i < len(args) { out = append(out, args[i])  i = i + 1 }
+}
+
+func cmd_version() {
+    out_ok("{\"tool\":\"cuzz\",\"version\":\"" + cuzz_version() + "\"}")
+}
+
+func cmd_compact(args) {
+    colls := []string{"messages", "channels", "tokens"}
+    res := []string{}
+    i := 0
+    while i < len(colls) {
+        c := colls[i]
+        okc := 0
+        if st_use(c) == 1 {
+            if gr_compact() == 1 { okc = 1 }
+        }
+        res = append(res, "{\"collection\":\"" + c + "\",\"ok\":" + str(okc) +
+            ",\"wal_chunks_after\":" + str(st_wal_chunks(c)) + "}")
+        i = i + 1
+    }
+    out_ok("{\"compacted\":[" + join(res, ",") + "]}")
+}
+
+func main() {
+    argv := args()
+    if len(argv) < 2 { usage() }
+    cmd := argv[1]
+    // parse_flags reads from index 1, so hand it the subcommand name at 0.
+    sub := shift(argv, 1)
+
+    if cmd == "version" { cmd_version() }
+    if cmd == "guide" { cmd_guide(shift(argv, 2)) }
+    if cmd == "help-json" { cmd_help_json() }
+    if cmd == "init" { cmd_init(sub) }
+    if cmd == "token" { cmd_token(sub) }
+    if cmd == "send" { cmd_send(sub) }
+    if cmd == "get" { cmd_get(sub) }
+    if cmd == "search" { cmd_search(sub) }
+    if cmd == "watch" { cmd_watch(sub) }
+    if cmd == "channels" { cmd_channels(sub) }
+    if cmd == "status" { cmd_status(sub) }
+    if cmd == "compact" { cmd_compact(sub) }
+    if cmd == "serve" { cmd_serve(sub) }
+    usage()
+}

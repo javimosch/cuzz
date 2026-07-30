@@ -1,0 +1,385 @@
+// cuzz serve — single-actor HTTP: REST + SSE + the chat page.
+//
+// Deliberately NOT machweb serve(): that runs each request in its own
+// goroutine, and the grange engine is a single-actor store held in package
+// globals. One accept loop owns the database; SSE connections are parked as
+// bare fds and fed from the same loop.
+
+var g_cors = "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type\r\n"
+
+func srv_ok(data) (res) {
+    res = response("200 OK", "application/json", "{\"ok\":true,\"data\":" + data + "}")
+}
+
+func srv_err(status, typ, msg) (res) {
+    res = response(status, "application/json", "{\"ok\":false,\"error\":{\"type\":\"" + typ + "\",\"message\":\"" + jesc_c(msg) + "\"}}")
+}
+
+func bearer(req) (tok) {
+    tok = ""
+    h := header(req, "authorization")
+    if has_prefix(h, "Bearer ") || has_prefix(h, "bearer ") { tok = substr(h, 7, len(h)) }
+    // EventSource cannot set headers, so /events accepts ?token= as well.
+    if len(tok) == 0 { tok = query(req, "token") }
+}
+
+// identify resolves a bearer credential to (agent, role). The human password is
+// checked first and is not stored in the tokens collection: it comes from the
+// environment, so rotating it is a restart, not a migration.
+func identify(tok) (agent, role) {
+    agent = ""
+    role = ""
+    if len(tok) == 0 { return }
+    pw := env("CUZZ_PASSWORD")
+    if len(pw) > 0 && tok == pw {
+        agent = env("CUZZ_HUMAN")
+        if len(agent) == 0 { agent = "human" }
+        role = "admin"
+        return
+    }
+    agent, role = tok_lookup(tok)
+}
+
+// ---- SSE fan-out ----
+// Parked connections: one entry per stream, fed from the accept loop.
+
+var g_sse_fd = []int{}
+var g_sse_chan = []string{}
+var g_sse_ts = []int{}
+var g_sse_ping = []int{}
+var g_sse_open = 0
+var g_last_seq = 0
+
+func sse_headers(fd) (ok) {
+    ok = 0
+    h := "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n" +
+        "Connection: keep-alive\r\nX-Accel-Buffering: no\r\n" + g_cors + "\r\n" +
+        ": connected\n\n"
+    if write(fd, h) < 0 { return }
+    ok = 1
+}
+
+func sse_park(fd, channel, since) {
+    g_sse_fd = append(g_sse_fd, fd)
+    g_sse_chan = append(g_sse_chan, channel)
+    g_sse_ts = append(g_sse_ts, since)
+    g_sse_ping = append(g_sse_ping, now_ms())
+}
+
+// sse_tick pushes whatever appended since each stream's own watermark. It only
+// queries when grange's change counter moved, so an idle relay costs one integer
+// comparison per loop turn rather than a scan per parked client.
+func sse_tick() {
+    if len(g_sse_fd) == 0 { return }
+    seq := st_seq("messages")
+    changed := 0
+    if seq != g_last_seq { changed = 1  g_last_seq = seq }
+    nowms := now_ms()
+
+    kfd := []int{}
+    kchan := []string{}
+    kts := []int{}
+    kping := []int{}
+    i := 0
+    while i < len(g_sse_fd) {
+        fd := g_sse_fd[i]
+        ch := g_sse_chan[i]
+        ts := g_sse_ts[i]
+        ping := g_sse_ping[i]
+        alive := 1
+        if changed == 1 {
+            docs := items_docs(st_find_ordered("messages", msg_where(ch, "", ts, ""), 0, "ts", 0))
+            j := 0
+            while j < len(docs) {
+                if write(fd, "data: " + docs[j] + "\n\n") < 0 { alive = 0  break }
+                tv, terr := json_get(docs[j], ".ts")
+                if len(terr) == 0 {
+                    t := parse_int(tv)
+                    if t > ts { ts = t }
+                }
+                j = j + 1
+            }
+            if len(docs) > 0 { ping = nowms }
+        }
+        // A comment frame every 20s: an idle stream through a proxy that times
+        // idle connections out would otherwise be dropped silently, and a dead
+        // peer is only detectable by writing to it.
+        if alive == 1 && nowms - ping >= 20000 {
+            if write(fd, ": ping\n\n") < 0 { alive = 0 }
+            ping = nowms
+        }
+        if alive == 1 {
+            kfd = append(kfd, fd)
+            kchan = append(kchan, ch)
+            kts = append(kts, ts)
+            kping = append(kping, ping)
+        } else {
+            close(fd)
+        }
+        i = i + 1
+    }
+    g_sse_fd = kfd
+    g_sse_chan = kchan
+    g_sse_ts = kts
+    g_sse_ping = kping
+}
+
+// ---- handlers ----
+
+func h_messages_get(req) (res) {
+    limit := parse_int(query(req, "limit"))
+    if limit < 0 { limit = 0 }
+    if limit == 0 && len(query(req, "limit")) == 0 { limit = 100 }
+    if limit > 5000 { limit = 5000 }
+    res = srv_ok(msg_query(query(req, "channel"), query(req, "kind"),
+        parse_since(query(req, "since")), query(req, "q"), limit))
+}
+
+func h_messages_post(req, agent) (res) {
+    body := trim(req.body)
+    cv, cerr := json_get(body, ".content")
+    if len(cerr) > 0 {
+        res = srv_err("400 Bad Request", "input", "body needs a content field")
+        return
+    }
+    ch, cherr := json_get(body, ".channel")
+    channel := "am-fleet"
+    if len(cherr) == 0 { channel = unq(ch) }
+    kv, kerr := json_get(body, ".kind")
+    kind := "message"
+    if len(kerr) == 0 { kind = unq(kv) }
+    rv, rerr := json_get(body, ".reply_to")
+    reply := ""
+    if len(rerr) == 0 { reply = unq(rv) }
+    // A body may name its own author (a wrapper script speaking for a step), but
+    // the token's agent is the default, so an unattributed message is still
+    // attributable.
+    av, aerr := json_get(body, ".author")
+    author := agent
+    if len(aerr) == 0 && len(unq(av)) > 0 { author = unq(av) }
+
+    doc, code, msg := msg_append(channel, author, kind, json_unescape(unq(cv)), reply)
+    if code == 80 { res = srv_err("400 Bad Request", "input", msg)  return }
+    if code > 0 { res = srv_err("500 Internal Server Error", "internal", msg)  return }
+    res = response("201 Created", "application/json", "{\"ok\":true,\"data\":" + doc + "}")
+}
+
+// json_unescape turns a JSON string token's escapes back into bytes. json_get
+// hands back the raw token, so a newline typed in the chat box arrives as the
+// two characters \ and n and would otherwise be stored literally.
+func json_unescape(s) (out) {
+    out = ""
+    i := 0
+    while i < len(s) {
+        c := charat(s, i)
+        if c == "\\" && i + 1 < len(s) {
+            n := charat(s, i + 1)
+            if n == "n" { out = out + "\n"  i = i + 2  continue }
+            if n == "r" { out = out + "\r"  i = i + 2  continue }
+            if n == "t" { out = out + "\t"  i = i + 2  continue }
+            if n == "\"" { out = out + "\""  i = i + 2  continue }
+            if n == "\\" { out = out + "\\"  i = i + 2  continue }
+            if n == "/" { out = out + "/"  i = i + 2  continue }
+            if n == "u" && i + 5 < len(s) {
+                // \uXXXX: keep the BMP characters a chat box actually produces
+                // (accents, dashes, emoji-adjacent symbols) as UTF-8.
+                out = out + utf8_from_code(parse_hex(substr(s, i + 2, i + 6)))
+                i = i + 6
+                continue
+            }
+        }
+        out = out + c
+        i = i + 1
+    }
+}
+
+func parse_hex(h) (n) {
+    n = 0
+    i := 0
+    while i < len(h) {
+        c := to_lower(charat(h, i))
+        d := 0
+        if c >= "0" && c <= "9" { d = parse_int(c) }
+        if c == "a" { d = 10 }
+        if c == "b" { d = 11 }
+        if c == "c" { d = 12 }
+        if c == "d" { d = 13 }
+        if c == "e" { d = 14 }
+        if c == "f" { d = 15 }
+        n = n * 16 + d
+        i = i + 1
+    }
+}
+
+func hex2(n) (s) {
+    d := "0123456789abcdef"
+    s = charat(d, (n / 16) % 16) + charat(d, n % 16)
+}
+
+// utf8_from_code encodes a BMP code point as UTF-8. There is no chr() builtin,
+// so the bytes are assembled as hex and turned into a string in one step. U+0000
+// yields "" — a NUL would truncate the string it landed in.
+func utf8_from_code(cp) (s) {
+    s = ""
+    if cp <= 0 { return }
+    h := hex2(cp)
+    if cp >= 128 && cp < 2048 { h = hex2(192 + cp / 64) + hex2(128 + cp % 64) }
+    if cp >= 2048 { h = hex2(224 + cp / 4096) + hex2(128 + (cp / 64) % 64) + hex2(128 + cp % 64) }
+    s = bytes_str(from_hex(h))
+}
+
+func srv_handle(req, fd) (res, parked) {
+    parked = 0
+    res = srv_err("404 Not Found", "not_found", "no such route")
+    p := req.path
+    q := index(p, "?")
+    if q >= 0 { p = substr(p, 0, q) }
+
+    if req.method == "OPTIONS" {
+        res = response("204 No Content", "text/plain", "")
+        return
+    }
+    // Unauthenticated discovery: what this is, and how to talk to it.
+    if req.method == "GET" && (p == "/health" || p == "/_health") {
+        res = srv_ok(status_json())
+        return
+    }
+    if req.method == "GET" && p == "/guide" {
+        res = response("200 OK", "application/json", guide_json())
+        return
+    }
+    if req.method == "GET" && p == "/llms.txt" {
+        res = response("200 OK", "text/plain; charset=utf-8", llms_txt())
+        return
+    }
+    if req.method == "GET" && p == "/version" {
+        res = srv_ok("{\"tool\":\"cuzz\",\"version\":\"" + cuzz_version() + "\"}")
+        return
+    }
+    if req.method == "GET" && (p == "/" || p == "") {
+        res = response("200 OK", "text/html; charset=utf-8", chat_html())
+        return
+    }
+
+    tok := bearer(req)
+    agent, role := identify(tok)
+    if len(agent) == 0 {
+        res = srv_err("401 Unauthorized", "auth", "missing or unknown bearer token")
+        return
+    }
+
+    if req.method == "GET" && p == "/api/whoami" {
+        res = srv_ok("{\"agent\":\"" + jesc_c(agent) + "\",\"role\":\"" + role + "\"}")
+        return
+    }
+    if req.method == "GET" && p == "/api/messages" {
+        res = h_messages_get(req)
+        return
+    }
+    if req.method == "POST" && p == "/api/messages" {
+        res = h_messages_post(req, agent)
+        return
+    }
+    if req.method == "GET" && p == "/api/channels" {
+        res = srv_ok(chan_list())
+        return
+    }
+    if req.method == "POST" && p == "/api/channels" {
+        if role != "admin" {
+            res = srv_err("403 Forbidden", "auth", "creating a channel needs an admin token (or just send to it — channels are auto-created)")
+            return
+        }
+        nv, nerr := json_get(trim(req.body), ".name")
+        if len(nerr) > 0 { res = srv_err("400 Bad Request", "input", "body needs a name field")  return }
+        name := unq(nv)
+        if chan_create(name) == 0 { res = srv_err("400 Bad Request", "input", "invalid channel name: " + name)  return }
+        res = response("201 Created", "application/json", "{\"ok\":true,\"data\":{\"created\":\"" + jesc_c(name) + "\"}}")
+        return
+    }
+    if req.method == "GET" && p == "/events" {
+        channel := query(req, "channel")
+        if len(channel) == 0 { channel = "am-fleet" }
+        if valid_name(channel) == 0 {
+            res = srv_err("400 Bad Request", "input", "invalid channel name")
+            return
+        }
+        if len(g_sse_fd) >= 64 {
+            res = srv_err("503 Service Unavailable", "capacity", "too many open streams")
+            return
+        }
+        // `since` empty means "only what happens from now on" — a fresh page
+        // loads its history over REST first and passes that watermark back.
+        since := parse_since(query(req, "since"))
+        if len(query(req, "since")) == 0 { since = now_ms() }
+        if sse_headers(fd) == 0 {
+            close(fd)
+            parked = 1
+            return
+        }
+        sse_park(fd, channel, since)
+        parked = 1
+        return
+    }
+}
+
+func cmd_serve(args) {
+    fs := new_flags("serve")
+    fs = flag_int(fs, "port", "p", "7700", "TCP port to listen on")
+    fs = parse_flags(fs, args)
+    port := flag_int_val(fs, "port")
+    if port <= 0 || port > 65535 { port = 7700 }
+
+    if mkdir_all(cuzz_db()) == 0 {
+        out_err(90, "resource", "cannot create db directory " + cuzz_db(), "check permissions or set CUZZ_DB")
+    }
+    if ensure_schema() == 0 {
+        out_err(110, "internal", "could not declare the grange schema", "run `cuzz init` first")
+    }
+    if len(env("CUZZ_PASSWORD")) == 0 {
+        eprint("{\"event\":\"warning\",\"message\":\"CUZZ_PASSWORD is unset — the chat page cannot log in; only agent tokens will work\"}")
+    }
+    // 256 KB bodies and a 30s read cap: messages are text, so anything larger is
+    // a mistake or an attack, and a slow-loris must not hold the single actor.
+    harden(262144, 30000)
+    g_last_seq = st_seq("messages")
+    eprint("{\"event\":\"listening\",\"port\":" + str(port) + ",\"db\":\"" + jesc_c(cuzz_db()) + "\"}")
+
+    server := listen(port)
+    if server < 0 {
+        out_err(90, "resource", "cannot listen on port " + str(port), "pick another --port or stop what is holding it")
+    }
+    // 200ms accept timeout: the loop must come back regularly to feed the parked
+    // SSE streams even when no request arrives.
+    socket_timeout(server, 200)
+    reqs := 0
+    for {
+        conn := accept(server)
+        if conn >= 0 {
+            socket_timeout(conn, 5000)
+            raw := read_request(conn)
+            if len(raw) == 0 {
+                close(conn)
+            } else {
+                req := parse_request(raw)
+                req.remote = peer_addr(conn)
+                res, parked := srv_handle(req, conn)
+                if parked == 0 {
+                    out := "HTTP/1.1 " + res.status + "\r\nContent-Type: " + res.ctype +
+                        "\r\nContent-Length: " + str(len(res.body)) + "\r\n" + g_cors +
+                        "Connection: close\r\n\r\n" + res.body
+                    write(conn, out)
+                    close(conn)
+                }
+            }
+            reqs = reqs + 1
+        }
+        sse_tick()
+        // Auto-compact: an append-only relay accumulates WAL chunks, and every
+        // restart replays them. Folding at 100 keeps startup flat.
+        if g_pend_recs == 0 && len(g_db) > 0 && g_cold == 0 {
+            if st_wal_chunks("messages") > 100 {
+                if st_use("messages") == 1 { gr_compact() }
+            }
+        }
+    }
+}

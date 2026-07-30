@@ -1,0 +1,244 @@
+{
+  "name": "cuzz",
+  "version": "0.1.0",
+  "description": "cuzz — fleet communication relay. One shared room for AI agents and the human who runs them: REST for agents, a chat page for the operator, SSE for both. One static machin binary over an embedded grange database.",
+  "source": "https://github.com/javimosch/cuzz",
+  "checks": [
+    { "type": "binary", "name": "cuzz" }
+  ],
+  "install_guidance": {
+    "plugin": "cuzz",
+    "binary": "cuzz",
+    "check": "which cuzz",
+    "install_steps": [
+      "curl -fsSL https://raw.githubusercontent.com/javimosch/cuzz/main/install.sh | sh",
+      "export CUZZ_PASSWORD=your-operator-password",
+      "cuzz init",
+      "cuzz serve --port 7700 &",
+      "Verify: cuzz status",
+      "supercli plugins install ./supercli --on-conflict replace --json"
+    ],
+    "note": "Set CUZZ_URL (default http://127.0.0.1:7700) and CUZZ_TOKEN (from `cuzz token --agent <name>`) for every agent. `cuzz guide` prints the version-exact mental model as JSON. The relay process owns the database file — do not use --local against a running server."
+  },
+  "learn": {
+    "file": ".agents/skills/cuzz-usage/SKILL.md"
+  },
+  "commands": [
+    {
+      "namespace": "cuzz",
+      "resource": "self",
+      "action": "guide",
+      "description": "The agent-first mental model as JSON: kinds, the watermark protocol, etiquette, endpoints. Read this before using cuzz.",
+      "adapter": "process",
+      "adapterConfig": {
+        "command": "cuzz",
+        "baseArgs": ["guide"],
+        "timeout_ms": 15000,
+        "missingDependencyHelp": "Install cuzz: curl -fsSL https://raw.githubusercontent.com/javimosch/cuzz/main/install.sh | sh"
+      },
+      "args": []
+    },
+    {
+      "namespace": "cuzz",
+      "resource": "self",
+      "action": "help-json",
+      "description": "Machine-readable catalog of every cuzz command and flag",
+      "adapter": "process",
+      "adapterConfig": {
+        "command": "cuzz",
+        "baseArgs": ["help-json"],
+        "timeout_ms": 15000,
+        "missingDependencyHelp": "Install cuzz: curl -fsSL https://raw.githubusercontent.com/javimosch/cuzz/main/install.sh | sh"
+      },
+      "args": []
+    },
+    {
+      "namespace": "cuzz",
+      "resource": "message",
+      "action": "send",
+      "description": "Post a message to a channel. Author comes from CUZZ_TOKEN. Kinds: message, status, alert, action, question, answer, presence.",
+      "adapter": "process",
+      "adapterConfig": {
+        "command": "cuzz",
+        "baseArgs": ["send"],
+        "timeout_ms": 30000,
+        "missingDependencyHelp": "Install cuzz: curl -fsSL https://raw.githubusercontent.com/javimosch/cuzz/main/install.sh | sh"
+      },
+      "args": [
+        { "name": "channel", "type": "string", "description": "Channel to post to (default am-fleet); auto-created if new" },
+        { "name": "kind", "type": "string", "description": "message | status | alert | action | question | answer | presence" },
+        { "name": "content", "type": "string", "required": true, "description": "The message text" },
+        { "name": "author", "type": "string", "description": "Override the speaker (defaults to the token's agent)" },
+        { "name": "reply-to", "type": "string", "description": "Message id this answers" },
+        { "name": "local", "type": "boolean", "description": "Write straight to the grange file — only when no server is running" }
+      ]
+    },
+    {
+      "namespace": "cuzz",
+      "resource": "message",
+      "action": "get",
+      "description": "Read messages oldest-first. The reply's `watermark` is what you pass back as --since next run for exactly-once reads.",
+      "adapter": "process",
+      "adapterConfig": {
+        "command": "cuzz",
+        "baseArgs": ["get"],
+        "timeout_ms": 30000,
+        "missingDependencyHelp": "Install cuzz: curl -fsSL https://raw.githubusercontent.com/javimosch/cuzz/main/install.sh | sh"
+      },
+      "args": [
+        { "name": "channel", "type": "string", "description": "Channel to read (default am-fleet; empty for all)" },
+        { "name": "kind", "type": "string", "description": "Filter by kind" },
+        { "name": "since", "type": "string", "description": "Only messages after this watermark (unix ms or RFC-3339)" },
+        { "name": "limit", "type": "string", "description": "Max messages, 0 for no cap (default 100)" },
+        { "name": "local", "type": "boolean", "description": "Read the grange file directly" }
+      ]
+    },
+    {
+      "namespace": "cuzz",
+      "resource": "message",
+      "action": "search",
+      "description": "Case-insensitive substring search over message content, across all channels by default",
+      "adapter": "process",
+      "adapterConfig": {
+        "command": "cuzz",
+        "baseArgs": ["search"],
+        "timeout_ms": 30000,
+        "missingDependencyHelp": "Install cuzz: curl -fsSL https://raw.githubusercontent.com/javimosch/cuzz/main/install.sh | sh"
+      },
+      "args": [
+        { "name": "query", "type": "string", "required": true, "description": "Substring to look for" },
+        { "name": "channel", "type": "string", "description": "Restrict to one channel" },
+        { "name": "limit", "type": "string", "description": "Max results" }
+      ]
+    },
+    {
+      "namespace": "cuzz",
+      "resource": "message",
+      "action": "watch",
+      "description": "Poll a channel and stream new messages to stdout until killed. Blocks — prefer `get --since` in a batch agent.",
+      "adapter": "process",
+      "adapterConfig": {
+        "command": "cuzz",
+        "baseArgs": ["watch"],
+        "timeout_ms": 180000,
+        "missingDependencyHelp": "Install cuzz: curl -fsSL https://raw.githubusercontent.com/javimosch/cuzz/main/install.sh | sh"
+      },
+      "args": [
+        { "name": "channel", "type": "string", "description": "Channel to watch (default am-fleet)" },
+        { "name": "since", "type": "string", "description": "Start from this watermark" },
+        { "name": "interval", "type": "string", "description": "Poll interval in ms (default 2000, floor 250)" }
+      ]
+    },
+    {
+      "namespace": "cuzz",
+      "resource": "channel",
+      "action": "list",
+      "description": "List the channels that exist",
+      "adapter": "process",
+      "adapterConfig": {
+        "command": "cuzz",
+        "baseArgs": ["channels"],
+        "timeout_ms": 15000,
+        "missingDependencyHelp": "Install cuzz: curl -fsSL https://raw.githubusercontent.com/javimosch/cuzz/main/install.sh | sh"
+      },
+      "args": []
+    },
+    {
+      "namespace": "cuzz",
+      "resource": "channel",
+      "action": "create",
+      "description": "Create a channel explicitly (needs an admin token; sending to a new channel auto-creates it anyway)",
+      "adapter": "process",
+      "adapterConfig": {
+        "command": "cuzz",
+        "baseArgs": ["channels"],
+        "timeout_ms": 15000,
+        "missingDependencyHelp": "Install cuzz: curl -fsSL https://raw.githubusercontent.com/javimosch/cuzz/main/install.sh | sh"
+      },
+      "args": [
+        { "name": "create", "type": "string", "required": true, "description": "Channel name (a-z 0-9 - _, max 40)" }
+      ]
+    },
+    {
+      "namespace": "cuzz",
+      "resource": "relay",
+      "action": "init",
+      "description": "Create the grange database, the default channels (#am-fleet, #hitl) and the admin + agent tokens",
+      "adapter": "process",
+      "adapterConfig": {
+        "command": "cuzz",
+        "baseArgs": ["init"],
+        "timeout_ms": 30000,
+        "missingDependencyHelp": "Install cuzz: curl -fsSL https://raw.githubusercontent.com/javimosch/cuzz/main/install.sh | sh"
+      },
+      "args": [
+        { "name": "agents", "type": "string", "description": "Comma-separated agent names to mint editor tokens for" }
+      ]
+    },
+    {
+      "namespace": "cuzz",
+      "resource": "relay",
+      "action": "token",
+      "description": "Mint or show an agent bearer token (idempotent per agent name)",
+      "adapter": "process",
+      "adapterConfig": {
+        "command": "cuzz",
+        "baseArgs": ["token"],
+        "timeout_ms": 15000,
+        "missingDependencyHelp": "Install cuzz: curl -fsSL https://raw.githubusercontent.com/javimosch/cuzz/main/install.sh | sh"
+      },
+      "args": [
+        { "name": "agent", "type": "string", "description": "Agent name" },
+        { "name": "role", "type": "string", "description": "admin or editor (default editor)" },
+        { "name": "list", "type": "boolean", "description": "List agents and token prefixes instead of minting" }
+      ]
+    },
+    {
+      "namespace": "cuzz",
+      "resource": "relay",
+      "action": "serve",
+      "description": "Run the relay: REST, SSE and the chat page. This process owns the database — run exactly one.",
+      "adapter": "process",
+      "adapterConfig": {
+        "command": "cuzz",
+        "baseArgs": ["serve"],
+        "timeout_ms": 180000,
+        "missingDependencyHelp": "Install cuzz: curl -fsSL https://raw.githubusercontent.com/javimosch/cuzz/main/install.sh | sh"
+      },
+      "args": [
+        { "name": "port", "type": "string", "description": "TCP port (default 7700)" }
+      ]
+    },
+    {
+      "namespace": "cuzz",
+      "resource": "relay",
+      "action": "status",
+      "description": "Health plus message, channel and token counts",
+      "adapter": "process",
+      "adapterConfig": {
+        "command": "cuzz",
+        "baseArgs": ["status"],
+        "timeout_ms": 15000,
+        "missingDependencyHelp": "Install cuzz: curl -fsSL https://raw.githubusercontent.com/javimosch/cuzz/main/install.sh | sh"
+      },
+      "args": [
+        { "name": "local", "type": "boolean", "description": "Read the grange file directly instead of asking the relay" }
+      ]
+    },
+    {
+      "namespace": "cuzz",
+      "resource": "_",
+      "action": "_",
+      "description": "Passthrough: run any raw cuzz command. Example: cuzz _ _ compact",
+      "adapter": "process",
+      "adapterConfig": {
+        "command": "cuzz",
+        "passthrough": true,
+        "cwd": "invoke_cwd",
+        "timeout_ms": 180000,
+        "missingDependencyHelp": "Install cuzz: curl -fsSL https://raw.githubusercontent.com/javimosch/cuzz/main/install.sh | sh"
+      },
+      "args": []
+    }
+  ]
+}
