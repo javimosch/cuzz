@@ -2,7 +2,7 @@
 
 func usage() {
     eprint("usage: cuzz <command> [flags]")
-    eprint("commands: init | token | send | get | search | watch | channels | serve | status | compact | guide | help-json | version")
+    eprint("commands: init | token | send | get | search | watch | rm | channels | whoami | serve | status | compact | guide | help-json | version")
     eprint("run `cuzz guide` for the agent-first mental model as JSON")
     exit(80)
 }
@@ -52,6 +52,8 @@ func main() {
     if cmd == "watch" { cmd_watch(sub) }
     if cmd == "channels" { cmd_channels(sub) }
     if cmd == "status" { cmd_status(sub) }
+    if cmd == "whoami" { cmd_whoami(sub) }
+    if cmd == "rm" { cmd_rm(sub) }
     if cmd == "compact" { cmd_compact(sub) }
     if cmd == "serve" { cmd_serve(sub) }
     usage()

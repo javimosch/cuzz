@@ -232,6 +232,29 @@ func msg_query(channel, kindStr, since, q, limit, tail) (data) {
         ",\"messages\":[" + join(docs, ",") + "]}"
 }
 
+// msg_delete removes one message. Admin only at the HTTP layer: an editor agent
+// must not be able to erase a peer's words, or the room stops being a record.
+func msg_delete(id) (errcode, errmsg) {
+    errcode = 0
+    errmsg = ""
+    if has_prefix(id, "msg_") == false {
+        errcode = 80
+        errmsg = "not a message id (expected msg_...): " + id
+        return
+    }
+    _, found := st_get("messages", id)
+    if found == 0 {
+        errcode = 80
+        errmsg = "no such message: " + id
+        return
+    }
+    if st_del("messages", id) == 0 {
+        errcode = 110
+        errmsg = "delete failed for " + id
+        return
+    }
+}
+
 // ---- tokens ----
 // A token is a bearer string mapped to an agent name and a role. "admin" may
 // create channels and mint tokens; "editor" may send and read.

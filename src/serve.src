@@ -26,15 +26,21 @@ func bearer(req) (tok) {
 // identify resolves a bearer credential to (agent, role). The human password is
 // checked first and is not stored in the tokens collection: it comes from the
 // environment, so rotating it is a restart, not a migration.
-func identify(tok) (agent, role) {
+// identify also reports whether the credential was the OPERATOR PASSWORD rather
+// than an agent token. That matters: the password authors messages as the human,
+// so an agent that happens to have CUZZ_PASSWORD in its environment silently
+// posts in the operator's name. Callers surface it instead of letting it pass.
+func identify(tok) (agent, role, is_human) {
     agent = ""
     role = ""
+    is_human = 0
     if len(tok) == 0 { return }
     pw := env("CUZZ_PASSWORD")
     if len(pw) > 0 && tok == pw {
         agent = env("CUZZ_HUMAN")
         if len(agent) == 0 { agent = "human" }
         role = "admin"
+        is_human = 1
         return
     }
     agent, role = tok_lookup(tok)
@@ -138,7 +144,7 @@ func h_messages_get(req) (res) {
         parse_since(query(req, "since")), query(req, "q"), limit, tail))
 }
 
-func h_messages_post(req, agent) (res) {
+func h_messages_post(req, agent, is_human) (res) {
     body := trim(req.body)
     cv, cerr := json_get(body, ".content")
     if len(cerr) > 0 {
@@ -164,7 +170,15 @@ func h_messages_post(req, agent) (res) {
     doc, code, msg := msg_append(channel, author, kind, json_unescape(unq(cv)), reply)
     if code == 80 { res = srv_err("400 Bad Request", "input", msg)  return }
     if code > 0 { res = srv_err("500 Internal Server Error", "internal", msg)  return }
-    res = response("201 Created", "application/json", "{\"ok\":true,\"data\":" + doc + "}")
+    // A message written with the operator password carries the operator's name.
+    // Say so in the envelope rather than letting an agent impersonate the human
+    // by accident — the CLI turns this into a warning on stderr.
+    warn := ""
+    if is_human == 1 {
+        warn = ",\"warning\":\"written with CUZZ_PASSWORD (the operator credential), not an agent token" +
+            "; authored as '" + jesc_c(author) + "'. Set CUZZ_TOKEN to an agent token if you did not mean to speak with the operator's credential\""
+    }
+    res = response("201 Created", "application/json", "{\"ok\":true,\"data\":" + doc + warn + "}")
 }
 
 // json_unescape turns a JSON string token's escapes back into bytes. json_get
@@ -265,7 +279,7 @@ func srv_handle(req, fd) (res, parked) {
     }
 
     tok := bearer(req)
-    agent, role := identify(tok)
+    agent, role, is_human := identify(tok)
     if len(agent) == 0 {
         res = srv_err("401 Unauthorized", "auth", "missing or unknown bearer token")
         return
@@ -280,7 +294,20 @@ func srv_handle(req, fd) (res, parked) {
         return
     }
     if req.method == "POST" && p == "/api/messages" {
-        res = h_messages_post(req, agent)
+        res = h_messages_post(req, agent, is_human)
+        return
+    }
+    // DELETE /api/messages/<id> — admin only, for cleaning up a mistake.
+    if req.method == "DELETE" && has_prefix(p, "/api/messages/") {
+        if role != "admin" {
+            res = srv_err("403 Forbidden", "auth", "deleting a message needs an admin token")
+            return
+        }
+        mid := substr(p, 14, len(p))
+        code, msg := msg_delete(mid)
+        if code == 80 { res = srv_err("404 Not Found", "not_found", msg)  return }
+        if code > 0 { res = srv_err("500 Internal Server Error", "internal", msg)  return }
+        res = srv_ok("{\"deleted\":\"" + jesc_c(mid) + "\"}")
         return
     }
     if req.method == "GET" && p == "/api/channels" {

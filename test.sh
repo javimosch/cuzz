@@ -128,6 +128,25 @@ is "its messages are gone too"        "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" get -
 is "a neighbouring channel survives"  "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" get -c keeper --limit 0 | jq_ data.count)" "1"
 is "deleting it twice is refused"     "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "localhost:$PORT/api/channels/doomed" -H "Authorization: Bearer $CUZZ_PASSWORD")" "400"
 
+# cuzz rm + the impersonation guard
+MID=$("$CUZZ" send -c keeper -m "delete me" | jq_ data.id)
+is "rm without --yes refuses"        "$("$CUZZ" rm "$MID" >/dev/null 2>&1; echo $?)" "80"
+is "the message is still there"      "$("$CUZZ" get -c keeper --limit 0 | jq_ data.count)" "2"
+is "an editor token cannot rm"       "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "localhost:$PORT/api/messages/$MID" -H "Authorization: Bearer $AGENT_TOK")" "403"
+is "admin rm deletes it"             "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" rm "$MID" --yes | jq_ data.count)" "1"
+is "and it is really gone"           "$("$CUZZ" get -c keeper --limit 0 | jq_ data.count)" "1"
+is "rm of an unknown id is 404"      "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "localhost:$PORT/api/messages/msg_deadbeef" -H "Authorization: Bearer $CUZZ_PASSWORD")" "404"
+is "rm rejects a non-message id"     "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "localhost:$PORT/api/messages/nope" -H "Authorization: Bearer $CUZZ_PASSWORD")" "404"
+
+# posting with the operator password authors as the human — that must be LOUD
+is "password posts as the human"     "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" send -c keeper -m "who am i" 2>/dev/null | jq_ data.author)" "javi"
+is "and warns on stderr"             "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" send -c keeper -m "warn me" 2>&1 >/dev/null | grep -c 'CUZZ_PASSWORD')" "1"
+is "the warning names the author"    "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" send -c keeper -m "name me" 2>&1 >/dev/null | grep -c 'posted as')" "1"
+is "the warning names javi"           "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" send -c keeper -m "name me 2" 2>&1 >/dev/null | grep -c javi)" "1"
+is "an agent token does NOT warn"    "$("$CUZZ" send -c keeper -m "quiet" 2>&1 >/dev/null | grep -c 'CUZZ_PASSWORD')" "0"
+is "the warning never hits stdout"   "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" send -c keeper -m "clean stdout" 2>/dev/null | grep -c warning)" "0"
+is "whoami reports the identity"     "$("$CUZZ" whoami | jq_ data.agent)" "merger"
+
 # a relay that is not running must say so, with a retryable code
 ( unset CUZZ_TOKEN; CUZZ_URL=http://127.0.0.1:1 "$CUZZ" get -c am-fleet >/dev/null 2>&1 )
 is "an unreachable relay exits 100" "$?" "100"

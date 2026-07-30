@@ -7,7 +7,7 @@ func guide_json() (s) {
         ",\"mental_model\":\"cuzz is a single-room chat relay, not a Slack. Messages are appended to named channels; every message has an author, a kind, and a timestamp. Agents post state changes and read what changed since their last run; the human watches a web page and types back. The bus is the source of truth: anything not in cuzz did not happen.\"" +
         ",\"storage\":\"an embedded grange database at $CUZZ_DB (default ~/.cuzz/cuzz.data) — no separate DB process\"" +
         ",\"topology\":\"one long-lived process (cuzz serve) owns the database; every CLI call is a stateless HTTP request to it. --local bypasses HTTP and opens the grange file directly, for bootstrap and tests only — never while a server is running on the same file.\"" +
-        ",\"auth\":\"Authorization: Bearer <token>. Agents use $CUZZ_TOKEN (minted by cuzz init / cuzz token). The human uses $CUZZ_PASSWORD, which the web page prompts for and keeps in localStorage.\"" +
+        ",\"auth\":\"Authorization: Bearer <token>. Agents use $CUZZ_TOKEN (minted by cuzz init / cuzz token). The human uses $CUZZ_PASSWORD, which the web page prompts for and keeps in localStorage. WARNING: the password authors messages AS THE HUMAN — if CUZZ_PASSWORD is set in an agent's environment and CUZZ_TOKEN is not, that agent posts in the operator's name. Run `cuzz whoami` before a scripted send; the relay also warns on stderr when you post as the human.\"" +
         ",\"kinds\":[" +
         "{\"n\":1,\"name\":\"message\",\"use\":\"plain talk — 'starting work on #818'\"}," +
         "{\"n\":2,\"name\":\"status\",\"use\":\"a state change — 'verify PASSED on #822'\"}," +
@@ -26,7 +26,7 @@ func guide_json() (s) {
         ",\"first_read\":\"with no watermark yet, use --tail N (the NEWEST n, still in chronological order) — NOT --limit N, which is ascending and would hand you the OLDEST n and park your watermark just past them.\"" +
         ",\"not\":[\"not Nostr-compatible — no keypairs, no federation\",\"no threads, reactions, or DMs\",\"not a workflow engine — no triggers or approvals; systemd and shell scripts orchestrate\",\"not multi-tenant — one relay, one fleet\",\"does not know about GitHub; PR numbers are just text in a message\"]" +
         ",\"exit_codes\":{\"0\":\"ok\",\"80-89\":\"your input or auth\",\"90-99\":\"resource (db unwritable)\",\"100-109\":\"integration (relay unreachable) — retryable\",\"110-119\":\"internal\"}" +
-        ",\"discover\":{\"guide\":\"/guide\",\"llms\":\"/llms.txt\",\"health\":\"/health\",\"chat\":\"/\",\"api\":\"/api/messages, /api/channels (DELETE /api/channels/<name> to remove one, admin), /api/tokens (admin)\",\"sse\":\"/events?channel=<name>\"}" +
+        ",\"discover\":{\"guide\":\"/guide\",\"llms\":\"/llms.txt\",\"health\":\"/health\",\"chat\":\"/\",\"api\":\"/api/messages (POST to append, DELETE /api/messages/<id> to remove one — admin), /api/channels (DELETE /api/channels/<name> to remove one, admin), /api/tokens (admin), /api/whoami\",\"sse\":\"/events?channel=<name>\"}" +
         "}"
 }
 
@@ -47,6 +47,8 @@ func llms_txt() (s) {
         "- `GET /api/channels` / `POST /api/channels` `{\"name\":\"...\"}` (admin token).\n" +
         "- `DELETE /api/channels/<name>` (admin) — removes the channel AND every message in it.\n" +
         "  Irreversible. Channels auto-create on first send, so this is how a typo gets undone.\n" +
+        "- `DELETE /api/messages/<id>` (admin) — removes one message. Irreversible.\n" +
+        "- `GET /api/whoami` — which identity your credential speaks as.\n" +
         "- `GET /api/tokens` / `POST /api/tokens` `{\"agent\":\"...\",\"role\":\"editor|admin\"}` (admin token).\n" +
         "  Minting is idempotent per agent name: the same agent always gets the same token back.\n" +
         "- `GET /events?channel=<name>` — server-sent events, one `data:` line of message JSON each.\n" +
@@ -87,6 +89,8 @@ func cmd_help_json() {
         "{\"name\":\"search\",\"summary\":\"case-insensitive substring search over message content\",\"flags\":[\"--query\",\"--channel\",\"--limit\"]}," +
         "{\"name\":\"watch\",\"summary\":\"poll a channel and stream new messages to stdout until killed\",\"flags\":[\"--channel\",\"--since\",\"--interval\"]}," +
         "{\"name\":\"channels\",\"summary\":\"list, create or delete channels\",\"flags\":[\"--create <name>\",\"--delete <name>\",\"--yes\"]}," +
+        "{\"name\":\"rm\",\"summary\":\"delete messages by id (admin, irreversible)\",\"flags\":[\"<id>...\",\"--yes\"]}," +
+        "{\"name\":\"whoami\",\"summary\":\"which identity your credential speaks as — check before a scripted send\",\"flags\":[]}," +
         "{\"name\":\"serve\",\"summary\":\"run the HTTP relay: REST, SSE and the chat page\",\"flags\":[\"--port\"]}," +
         "{\"name\":\"status\",\"summary\":\"health, message and channel counts\",\"flags\":[\"--local\"]}," +
         "{\"name\":\"compact\",\"summary\":\"fold the write-ahead chunks into one segment\",\"flags\":[]}," +

@@ -42,11 +42,59 @@ func http_call(method, path, body) (data) {
         if status >= 500 { code = 110 }
         out_err(code, "request", msg, "")
     }
+    // The relay may attach a warning to the envelope (e.g. "you posted as the
+    // human"). It goes to stderr so stdout stays pure data JSON, but it is NOT
+    // swallowed — a silent misattribution is how the record gets corrupted.
+    wv, werr := json_get(resp, ".warning")
+    if len(werr) == 0 && len(unq(wv)) > 0 {
+        eprint("{\"event\":\"warning\",\"message\":\"" + jesc_c(unq(wv)) + "\"}")
+    }
     dv, derr := json_get(resp, ".data")
     if len(derr) > 0 {
         out_err(110, "internal", "malformed relay response", "")
     }
     data = dv
+}
+
+// cmd_whoami answers "which identity am I about to speak as?" — cheap to run
+// before a scripted send, and the thing that makes an accidental impersonation
+// visible before it happens rather than after.
+func cmd_whoami(args) {
+    out_ok(http_call("GET", "/api/whoami", ""))
+}
+
+// cmd_rm deletes messages by id. Admin only at the relay; --yes because there is
+// no undo.
+func cmd_rm(args) {
+    fs := new_flags("rm")
+    fs = flag_bool(fs, "yes", "y", "confirm — deletion cannot be undone")
+    fs = flag_bool(fs, "local", "", "use the grange file directly")
+    fs = parse_flags(fs, args)
+
+    ids := fs.rest
+    if len(ids) == 0 {
+        out_err(80, "input", "no message ids given", "cuzz rm msg_abc123 --yes")
+    }
+    if flag_on(fs, "yes") == false {
+        out_err(80, "input", "deleting " + str(len(ids)) + " message(s) cannot be undone",
+            "re-run with --yes if that is what you want")
+    }
+    local := 0
+    if flag_on(fs, "local") || cli_local() == 1 { local = 1 }
+
+    done := []string{}
+    i := 0
+    while i < len(ids) {
+        if local == 1 {
+            code, msg := msg_delete(ids[i])
+            if code > 0 { out_err(code, "input", msg, "") }
+        } else {
+            http_call("DELETE", "/api/messages/" + url_encode(ids[i]), "")
+        }
+        done = append(done, "\"" + jesc_c(ids[i]) + "\"")
+        i = i + 1
+    }
+    out_ok("{\"deleted\":[" + join(done, ",") + "],\"count\":" + str(len(done)) + "}")
 }
 
 // ---- init ----

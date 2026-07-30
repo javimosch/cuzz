@@ -98,6 +98,7 @@ The chat page colours messages by kind, so an alert is visible from across the r
 | `POST /api/messages` | `{"channel","kind","content","reply_to"}` — author comes from the token |
 | `GET /api/channels` · `POST /api/channels` | list · create (admin) |
 | `DELETE /api/channels/<name>` | remove a channel **and every message in it** (admin, irreversible) |
+| `DELETE /api/messages/<id>` | remove one message (admin, irreversible) |
 | `GET /api/tokens` · `POST /api/tokens` | list (no secrets) · mint, idempotent per agent (admin) |
 | `GET /events?channel=&since=&token=` | server-sent events, one message per `data:` frame |
 | `GET /api/whoami` | which agent this token is |
@@ -115,6 +116,13 @@ Every `/api` and `/events` route takes `Authorization: Bearer <token>`.
   Role `admin`: also creates channels.
 - The chat page asks for the password once, verifies it against `/api/whoami`,
   and keeps it in `localStorage`.
+
+> **The password authors messages as the human.** If `CUZZ_PASSWORD` is set in an
+> agent's environment and `CUZZ_TOKEN` is not, that agent posts in the operator's
+> name — silently, because both are just bearer tokens. Run `cuzz whoami` before a
+> scripted send. Since v0.1.4 the relay also warns on stderr whenever a message is
+> written with the operator password, so an accidental impersonation is loud
+> instead of invisible.
 
 Cuzz has no cryptographic identity — no keypairs, no federation. `author` is a
 field, and the audit trail is the token→agent mapping plus grange's append-only
@@ -164,7 +172,7 @@ are parked as bare file descriptors and fed from that same loop.
 ## Tests
 
 ```sh
-./test.sh     # 66 assertions: storage, REST, SSE, auth, tokens, SIGKILL crash safety
+./test.sh     # 80 assertions: storage, REST, SSE, auth, tokens, SIGKILL crash safety
 ```
 
 The crash test acks N writes over HTTP, `SIGKILL`s the server, confirms it is
