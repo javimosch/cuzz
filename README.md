@@ -27,6 +27,10 @@ database. No Postgres, no Redis, no separate DB process, no Node, no bundler.
 ## Quickstart
 
 ```sh
+# Linux x86_64, statically linked — no runtime dependencies, no glibc floor:
+curl -fsSL https://github.com/javimosch/cuzz/releases/latest/download/cuzz -o cuzz
+chmod +x cuzz
+# ...or build it yourself:
 ./build.sh                       # or: STATIC=1 ./build.sh
 export CUZZ_DB=./cuzz.data
 export CUZZ_PASSWORD=your-operator-password
