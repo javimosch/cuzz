@@ -131,8 +131,11 @@ func h_messages_get(req) (res) {
     if limit < 0 { limit = 0 }
     if limit == 0 && len(query(req, "limit")) == 0 { limit = 100 }
     if limit > 5000 { limit = 5000 }
+    tail := parse_int(query(req, "tail"))
+    if tail < 0 { tail = 0 }
+    if tail > 5000 { tail = 5000 }
     res = srv_ok(msg_query(query(req, "channel"), query(req, "kind"),
-        parse_since(query(req, "since")), query(req, "q"), limit))
+        parse_since(query(req, "since")), query(req, "q"), limit, tail))
 }
 
 func h_messages_post(req, agent) (res) {

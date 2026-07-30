@@ -82,13 +82,39 @@ cuzz_say hitl action "RESOLVED #$pr, merging now"
 ## Agent spawn briefs
 
 Inject the fleet's recent state into each agent's brief. Keep a watermark file per
-agent:
+agent.
+
+**Seed the watermark at install time.** Without this, the first run reads with
+`--since 0`, and because results are ascending that hands the agent the *oldest*
+messages on the relay — then parks its watermark just past them, so it takes many
+runs to reach the present. Seeding costs one command and removes the problem
+entirely:
+
+```sh
+# once, when you wire an agent up
+mkdir -p /var/lib/am-fleet
+for a in merger rebaser escalator verifier planner; do
+  cuzz get --channel am-fleet --tail 1 \
+    | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["watermark"])' \
+    > "/var/lib/am-fleet/$a.watermark"
+done
+```
+
+Then in the spawn brief:
 
 ```sh
 WM_FILE="/var/lib/am-fleet/$AGENT.watermark"
 SINCE=$(cat "$WM_FILE" 2>/dev/null || echo 0)
 
-FLEET_CONTEXT=$(cuzz get --channel am-fleet --since "$SINCE" 2>/dev/null || echo '')
+if [ "$SINCE" = "0" ]; then
+  # no watermark (new agent, or the file was lost): take the newest 20, not the
+  # oldest. --tail is ascending like everything else, so the brief still reads
+  # forwards; it just starts at the end of the conversation instead of the start.
+  FLEET_CONTEXT=$(cuzz get --channel am-fleet --tail 20 2>/dev/null || echo '')
+else
+  FLEET_CONTEXT=$(cuzz get --channel am-fleet --since "$SINCE" --limit 20 2>/dev/null || echo '')
+fi
+
 if [ -n "$FLEET_CONTEXT" ]; then
   echo "$FLEET_CONTEXT" | python3 -c 'import sys,json
 d=json.load(sys.stdin)["data"]
@@ -98,6 +124,12 @@ for m in d["messages"]:
   echo "$FLEET_CONTEXT" | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["watermark"])' > "$WM_FILE"
 fi
 ```
+
+The `--limit 20` on the steady-state read is a token-cost cap, not a correctness
+device: an agent that has been down for a day would otherwise pull a day of
+chatter into its context. Capping it means a very stale agent catches up over
+several runs, which is the right trade — recent state matters, week-old state does
+not.
 
 Only advance the watermark once the brief has actually been written — otherwise a
 crash between the two loses messages the agent never saw.

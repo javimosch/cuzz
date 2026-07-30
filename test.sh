@@ -102,6 +102,16 @@ is "listing tokens never echoes a secret" "$(curl -s "localhost:$PORT/api/tokens
 is "the CLI mints over HTTP" "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" token --agent glm-supervisor | jq_ data.agent)" "glm-supervisor"
 is "a minted token actually works" "$(TOK=$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" token --agent glm-supervisor | jq_ data.token); curl -s "localhost:$PORT/api/whoami" -H "Authorization: Bearer $TOK" | jq_ data.agent)" "glm-supervisor"
 
+# --tail: the newest n, in chronological order. A plain --limit cannot express
+# this — ascending order means limit takes the OLDEST n.
+for i in 1 2 3 4 5 6 7 8; do CUZZ_LOCAL=1 CUZZ_AGENT=bot "$CUZZ" send -c ordering -m "m$i" >/dev/null; done
+is "limit takes the oldest n"        "$(CUZZ_LOCAL=1 "$CUZZ" get -c ordering --limit 3 | jq_ data.messages.0.content)" "m1"
+is "limit's last is not the newest"  "$(CUZZ_LOCAL=1 "$CUZZ" get -c ordering --limit 3 | jq_ data.messages.2.content)" "m3"
+is "tail takes the newest n"         "$(CUZZ_LOCAL=1 "$CUZZ" get -c ordering --tail 3 | jq_ data.messages.2.content)" "m8"
+is "tail is still chronological"     "$(CUZZ_LOCAL=1 "$CUZZ" get -c ordering --tail 3 | jq_ data.messages.0.content)" "m6"
+is "tail's watermark is the newest"  "$(CUZZ_LOCAL=1 "$CUZZ" get -c ordering --tail 3 | jq_ data.watermark)" "$(CUZZ_LOCAL=1 "$CUZZ" get -c ordering --limit 0 | jq_ data.watermark)"
+is "tail resumes with no gap"        "$(CUZZ_LOCAL=1 "$CUZZ" get -c ordering --since "$(CUZZ_LOCAL=1 "$CUZZ" get -c ordering --tail 3 | jq_ data.watermark)" | jq_ data.count)" "0"
+
 # a relay that is not running must say so, with a retryable code
 ( unset CUZZ_TOKEN; CUZZ_URL=http://127.0.0.1:1 "$CUZZ" get -c am-fleet >/dev/null 2>&1 )
 is "an unreachable relay exits 100" "$?" "100"

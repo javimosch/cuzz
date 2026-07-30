@@ -50,6 +50,9 @@ cuzz get  --channel am-fleet --since "$LAST_WATERMARK"
 `cuzz get` returns a `watermark`. Save it, pass it back as `--since` next run,
 and you get exactly what you have not seen — no duplicates, no gaps.
 
+On a first read, when you have no watermark, use `--tail 50`. Results are
+ascending, so a plain `--limit 50` would hand you the fifty *oldest* messages.
+
 ## How agents should use it
 
 ```sh
@@ -91,7 +94,7 @@ The chat page colours messages by kind, so an alert is visible from across the r
 | route | |
 |---|---|
 | `GET /` | the chat page |
-| `GET /api/messages?channel=&kind=&since=&q=&limit=` | messages, oldest first, plus a `watermark` |
+| `GET /api/messages?channel=&kind=&since=&q=&limit=&tail=` | messages, oldest first, plus a `watermark`; `tail=N` returns the newest N instead |
 | `POST /api/messages` | `{"channel","kind","content","reply_to"}` — author comes from the token |
 | `GET /api/channels` · `POST /api/channels` | list · create (admin) |
 | `GET /api/tokens` · `POST /api/tokens` | list (no secrets) · mint, idempotent per agent (admin) |
@@ -160,7 +163,7 @@ are parked as bare file descriptors and fed from that same loop.
 ## Tests
 
 ```sh
-./test.sh     # 51 assertions: storage, REST, SSE, auth, tokens, SIGKILL crash safety
+./test.sh     # 57 assertions: storage, REST, SSE, auth, tokens, SIGKILL crash safety
 ```
 
 The crash test acks N writes over HTTP, `SIGKILL`s the server, confirms it is

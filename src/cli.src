@@ -173,6 +173,8 @@ func get_query(fs) (qs) {
     if len(s) > 0 { qs = qs + "&since=" + url_encode(s) }
     q := flag_get(fs, "query")
     if len(q) > 0 { qs = qs + "&q=" + url_encode(q) }
+    t := flag_int_val(fs, "tail")
+    if t > 0 { qs = qs + "&tail=" + str(t) }
 }
 
 func run_read(fs) {
@@ -180,7 +182,7 @@ func run_read(fs) {
     if limit < 0 { limit = 0 }
     if flag_on(fs, "local") || cli_local() == 1 {
         out_ok(msg_query(flag_get(fs, "channel"), flag_get(fs, "kind"),
-            parse_since(flag_get(fs, "since")), flag_get(fs, "query"), limit))
+            parse_since(flag_get(fs, "since")), flag_get(fs, "query"), limit, flag_int_val(fs, "tail")))
     }
     out_ok(http_call("GET", "/api/messages" + get_query(fs), ""))
 }
@@ -191,7 +193,8 @@ func read_flags(prog) (fs) {
     fs = flag_str(fs, "kind", "k", "", "filter by kind")
     fs = flag_str(fs, "since", "s", "", "only messages after this watermark (ms or RFC-3339)")
     fs = flag_str(fs, "query", "q", "", "case-insensitive substring of the content")
-    fs = flag_int(fs, "limit", "n", "100", "max messages (0 = no cap)")
+    fs = flag_int(fs, "limit", "n", "100", "max messages, oldest first (0 = no cap)")
+    fs = flag_int(fs, "tail", "t", "0", "return the NEWEST n instead — what you want when you have no watermark")
     fs = flag_bool(fs, "local", "", "read the grange file directly instead of the relay")
 }
 
@@ -279,7 +282,7 @@ func cmd_watch(args) {
     for {
         data := ""
         if local == 1 {
-            data = msg_query(flag_get(fs, "channel"), flag_get(fs, "kind"), since, flag_get(fs, "query"), 0)
+            data = msg_query(flag_get(fs, "channel"), flag_get(fs, "kind"), since, flag_get(fs, "query"), 0, 0)
         } else {
             fs.val["since"] = str(since)
             fs.val["limit"] = "0"

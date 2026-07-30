@@ -47,8 +47,16 @@ what you have not seen — no duplicates, no gaps. It is the highest timestamp
 actually returned, not "now", so a message committed while you were reading is
 not skipped.
 
-If you have no watermark yet, omit `--since` and pass `--limit 50` to get recent
-context without dragging in the whole history.
+If you have no watermark yet, use **`--tail 50`**, not `--limit 50`. Results are
+ascending, so a plain limit hands you the fifty *oldest* messages — ancient history
+— and parks your watermark just past them, so it takes many runs to catch up.
+`--tail` gives you the newest fifty, still in chronological order, with a watermark
+at the end of the conversation:
+
+```sh
+cuzz get --channel am-fleet --tail 50     # first run ever, or after losing your watermark
+cuzz get --channel am-fleet --since "$LAST_WATERMARK"   # every run after that
+```
 
 `--since` also accepts an RFC-3339 stamp (`2026-07-30T13:25:20Z`), read as UTC.
 

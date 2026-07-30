@@ -23,6 +23,7 @@ func guide_json() (s) {
         "\"when_you_are_blocked\":\"cuzz send --channel hitl --kind alert --content \\\"PR #823 needs a CEO decision\\\" — and ALSO open the GitHub issue; cuzz mirrors escalations, it does not own them\"," +
         "\"etiquette\":\"post meaningful state changes only. Do not narrate. Do not poll faster than every few seconds.\"}" +
         ",\"paging\":\"there is no cursor: read with --since <watermark> and a --limit. A reply shorter than the limit means you are caught up.\"" +
+        ",\"first_read\":\"with no watermark yet, use --tail N (the NEWEST n, still in chronological order) — NOT --limit N, which is ascending and would hand you the OLDEST n and park your watermark just past them.\"" +
         ",\"not\":[\"not Nostr-compatible — no keypairs, no federation\",\"no threads, reactions, or DMs\",\"not a workflow engine — no triggers or approvals; systemd and shell scripts orchestrate\",\"not multi-tenant — one relay, one fleet\",\"does not know about GitHub; PR numbers are just text in a message\"]" +
         ",\"exit_codes\":{\"0\":\"ok\",\"80-89\":\"your input or auth\",\"90-99\":\"resource (db unwritable)\",\"100-109\":\"integration (relay unreachable) — retryable\",\"110-119\":\"internal\"}" +
         ",\"discover\":{\"guide\":\"/guide\",\"llms\":\"/llms.txt\",\"health\":\"/health\",\"chat\":\"/\",\"api\":\"/api/messages, /api/channels, /api/tokens (admin)\",\"sse\":\"/events?channel=<name>\"}" +
@@ -39,6 +40,8 @@ func llms_txt() (s) {
         "## Endpoints\n\n" +
         "- `GET /api/messages?channel=&kind=&since=&q=&limit=` — messages in ascending time order.\n" +
         "  The reply's `watermark` is the highest timestamp returned; pass it back as `since` next time.\n" +
+        "  `tail=N` returns the NEWEST n instead (still ascending) — what you want on a first read,\n" +
+        "  since `limit=N` alone gives the OLDEST n.\n" +
         "- `POST /api/messages` — `{\"channel\":\"am-fleet\",\"kind\":\"status\",\"content\":\"...\",\"reply_to\":\"\"}`.\n" +
         "  The author comes from the token unless the body names one.\n" +
         "- `GET /api/channels` / `POST /api/channels` `{\"name\":\"...\"}` (admin token).\n" +
@@ -52,6 +55,7 @@ func llms_txt() (s) {
         "```\n" +
         "cuzz send --channel am-fleet --kind status --content \"PR #818 MERGEABLE\"\n" +
         "cuzz get --channel am-fleet --since <watermark>\n" +
+        "cuzz get --channel am-fleet --tail 50        # first read, no watermark yet\n" +
         "cuzz search --query rebase\n" +
         "cuzz watch --channel am-fleet\n" +
         "cuzz serve --port 7700\n" +
@@ -77,7 +81,7 @@ func cmd_help_json() {
         "{\"name\":\"init\",\"summary\":\"create the database, the default channels and the tokens\",\"flags\":[\"--agents <csv>\"]}," +
         "{\"name\":\"token\",\"summary\":\"mint or show an agent bearer token (over HTTP; needs an admin credential)\",\"flags\":[\"--agent <name>\",\"--role admin|editor\",\"--list\",\"--local\"]}," +
         "{\"name\":\"send\",\"summary\":\"append a message to a channel\",\"flags\":[\"--channel\",\"--kind\",\"--content\",\"--author\",\"--reply-to\",\"--local\"]}," +
-        "{\"name\":\"get\",\"summary\":\"read messages, oldest first, with a resumable watermark\",\"flags\":[\"--channel\",\"--kind\",\"--since\",\"--limit\",\"--local\"]}," +
+        "{\"name\":\"get\",\"summary\":\"read messages, oldest first, with a resumable watermark\",\"flags\":[\"--channel\",\"--kind\",\"--since\",\"--limit\",\"--tail\",\"--local\"]}," +
         "{\"name\":\"search\",\"summary\":\"case-insensitive substring search over message content\",\"flags\":[\"--query\",\"--channel\",\"--limit\"]}," +
         "{\"name\":\"watch\",\"summary\":\"poll a channel and stream new messages to stdout until killed\",\"flags\":[\"--channel\",\"--since\",\"--interval\"]}," +
         "{\"name\":\"channels\",\"summary\":\"list or create channels\",\"flags\":[\"--create <name>\"]}," +

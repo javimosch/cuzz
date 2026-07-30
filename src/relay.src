@@ -148,12 +148,29 @@ func msg_where(channel, kindStr, since, q) (where) {
     where = join(cl, ",")
 }
 
-func msg_query(channel, kindStr, since, q, limit) (data) {
+// msg_query returns messages oldest-first. `tail` asks for the NEWEST n instead —
+// which is what "give me recent context" means, and which a plain limit cannot
+// express: results are ascending, so `--since 0 --limit 100` hands back the
+// hundred OLDEST messages and then parks the watermark just past them. An agent
+// with no watermark wants the end of the conversation, not the start of it.
+func msg_query(channel, kindStr, since, q, limit, tail) (data) {
     where := msg_where(channel, kindStr, since, q)
     if limit < 0 { limit = 0 }
-    docs := items_docs(st_find_ordered("messages", where, limit, "ts", 0))
+    docs := []string{}
+    if tail > 0 {
+        // walk descending to take the newest n, then flip back to chronological
+        // order so the caller always reads a conversation forwards.
+        nd := items_docs(st_find_ordered("messages", where, tail, "ts", 1))
+        i := len(nd) - 1
+        while i >= 0 {
+            docs = append(docs, nd[i])
+            i = i - 1
+        }
+    } else {
+        docs = items_docs(st_find_ordered("messages", where, limit, "ts", 0))
+    }
     hi := 0
-    i := 0
+    i = 0
     while i < len(docs) {
         tv, terr := json_get(docs[i], ".ts")
         if len(terr) == 0 {
