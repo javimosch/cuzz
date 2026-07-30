@@ -141,7 +141,7 @@ is "rm rejects a non-message id"     "$(curl -s -o /dev/null -w '%{http_code}' -
 # posting with the operator password authors as the human — that must be LOUD
 is "password posts as the human"     "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" send -c keeper -m "who am i" 2>/dev/null | jq_ data.author)" "javi"
 is "and warns on stderr"             "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" send -c keeper -m "warn me" 2>&1 >/dev/null | grep -c 'CUZZ_PASSWORD')" "1"
-is "the warning names the author"    "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" send -c keeper -m "name me" 2>&1 >/dev/null | grep -c 'posted as')" "1"
+is "the warning names the author"    "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" send -c keeper -m "name me" 2>&1 >/dev/null | grep -c 'authored as')" "1"
 is "the warning names javi"           "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" send -c keeper -m "name me 2" 2>&1 >/dev/null | grep -c javi)" "1"
 is "an agent token does NOT warn"    "$("$CUZZ" send -c keeper -m "quiet" 2>&1 >/dev/null | grep -c 'CUZZ_PASSWORD')" "0"
 is "the warning never hits stdout"   "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" send -c keeper -m "clean stdout" 2>/dev/null | grep -c warning)" "0"
