@@ -1,9 +1,9 @@
 {
   "tool": "cuzz",
-  "version": "0.1.7",
-  "sha256": "49f4724c6678918a14ec823de2adc56d78004d863d93f5fc96be89dd511eb59b",
-  "sha256_short": "49f4724c6678",
+  "version": "0.1.8",
+  "sha256": "17aacc5c3bee0c51d2439a2c95f246583d042fe3674ba37ff98fe9fa7c5060d6",
+  "sha256_short": "17aacc5c3bee",
   "asset": "cuzz",
-  "url": "https://github.com/javimosch/cuzz/releases/download/v0.1.7/cuzz",
+  "url": "https://github.com/javimosch/cuzz/releases/download/v0.1.8/cuzz",
   "size_bytes": 5531024
 }

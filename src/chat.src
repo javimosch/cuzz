@@ -34,11 +34,12 @@ func chat_html() (h) {
         ".k1 .c{color:var(--msg)}.k2 .c{color:var(--status)}.k3 .c{color:var(--alert);font-weight:600}" +
         ".k4 .c{color:var(--action)}.k5 .c{color:var(--q)}.k6 .c{color:var(--q)}.k7 .c{color:#5f6873}" +
         ".m.me .a{color:var(--human)}.m.me .c{color:var(--human)}" +
-        "footer{display:flex;gap:8px;padding:10px 14px;background:var(--pane);border-top:1px solid var(--line)}" +
-        "#in{flex:1;background:#0e1216;border:1px solid var(--line);border-radius:6px;color:var(--txt);padding:9px 11px;font:inherit}" +
+        "footer{display:flex;gap:8px;padding:10px 14px;background:var(--pane);border-top:1px solid var(--line);align-items:flex-end}" +
+        "#in{flex:1;background:#0e1216;border:1px solid var(--line);border-radius:6px;color:var(--txt);padding:9px 11px;" +
+        "font:inherit;line-height:1.5;resize:none;overflow-y:auto;max-height:168px;min-height:38px}" +
         "#in:focus{outline:none;border-color:#33526f}" +
-        "#send{background:#1e2833;color:var(--human);border:1px solid #2c3d4f;border-radius:6px;padding:0 18px;cursor:pointer;font:inherit}" +
-        "#kind{background:#0e1216;color:var(--dim);border:1px solid var(--line);border-radius:6px;font:inherit;padding:0 6px}" +
+        "#send{background:#1e2833;color:var(--human);border:1px solid #2c3d4f;border-radius:6px;padding:0 18px;cursor:pointer;font:inherit;height:38px;flex-shrink:0}" +
+        "#kind{background:#0e1216;color:var(--dim);border:1px solid var(--line);border-radius:6px;font:inherit;padding:0 6px;height:38px;flex-shrink:0}" +
         "#empty{color:var(--dim);padding:20px 0}" +
         ".m.men{background:rgba(122,184,255,.07);border-left:2px solid var(--human);margin-left:-10px;padding-left:8px}" +
         ".m .c b.at{color:var(--human);font-weight:600}" +
@@ -69,7 +70,7 @@ func chat_html() (h) {
         "<option value='question'>question</option><option value='answer'>answer</option>" +
         "</select>" +
         "<span id='acwrap'><div id='ac'></div>" +
-        "<input id='in' placeholder='type a message… (@ to tag)' autocomplete='off'></span>" +
+        "<textarea id='in' rows='1' placeholder='type a message… (@ to tag · Shift+Enter for a new line)' autocomplete='off'></textarea></span>" +
         "<button id='send'>Send</button></footer>" +
         "<script>" + chat_js() + "</script></body></html>"
 }
@@ -162,12 +163,16 @@ func chat_js() (j) {
         "function ac_pick(n){var i=document.getElementById('in');var cut=i.selectionStart;" +
         "var before=i.value.slice(0,cut).replace(/@([a-z0-9_-]*)$/i,'@'+acItems[n]+' ');" +
         "i.value=before+i.value.slice(cut);i.selectionStart=i.selectionEnd=before.length;" +
-        "ac_hide();i.focus();}" +
+        "ac_hide();grow();i.focus();}" +
         "ac.addEventListener('mousedown',function(e){var d=e.target.closest('div[data-n]');" +
         "if(d){e.preventDefault();ac_pick(parseInt(d.dataset.n,10));}});" +
-        "document.getElementById('in').addEventListener('input',ac_show);" +
+        // Grow with the content up to the CSS max-height, then let it scroll.
+        // Height must be reset to auto first or scrollHeight only ever increases.
+        "function grow(){var i=document.getElementById('in');i.style.height='auto';" +
+        "i.style.height=Math.min(i.scrollHeight,168)+'px';}" +
+        "document.getElementById('in').addEventListener('input',function(){ac_show();grow();});" +
         "document.getElementById('in').addEventListener('blur',function(){setTimeout(ac_hide,120);});" +
-        "function send(){var i=document.getElementById('in'),v=i.value.trim();if(!v)return;i.value='';ac_hide();" +
+        "function send(){var i=document.getElementById('in'),v=i.value.trim();if(!v)return;i.value='';ac_hide();grow();" +
         "fetch('/api/messages',{method:'POST',headers:{'Content-Type':'application/json'," +
         "Authorization:'Bearer '+pw()},body:JSON.stringify({channel:chan," +
         "kind:document.getElementById('kind').value,content:v})})" +
@@ -183,7 +188,10 @@ func chat_js() (j) {
         "if(e.key==='ArrowUp'){e.preventDefault();acSel=(acSel-1+acItems.length)%acItems.length;ac_show();return;}" +
         "if(e.key==='Enter'||e.key==='Tab'){e.preventDefault();ac_pick(acSel);return;}" +
         "if(e.key==='Escape'){e.preventDefault();ac_hide();return;}}" +
-        "if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});" +
+        // Shift+Enter is deliberately NOT intercepted — it falls through so the
+        // textarea inserts a newline itself. Enter alone sends.
+        "if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}" +
+        "if(e.key==='Enter'&&e.shiftKey){setTimeout(grow,0);}});" +
         // whoami also tells the page which author name is the human's, so their
         // own lines read differently without the name being baked into the binary.
         "function whoami(){fetch('/api/whoami',{headers:{Authorization:'Bearer '+pw()}})" +
