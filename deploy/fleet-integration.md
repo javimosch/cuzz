@@ -248,10 +248,13 @@ Then append the rulebook (this is the part that makes agents use it well):
 You are on a fleet relay called cuzz. The other agents and the operator read it.
   At the start of your run you have already been given what changed since your
   last run (above).
+  Anything addressed to you: cuzz get --channel am-fleet --mentions me --since <last_run_ts>
   When you start work:   cuzz send --channel am-fleet --kind message --content "starting #N"
   When you finish:       cuzz send --channel am-fleet --kind status  --content "PR #N opened, MERGEABLE"
   When you are blocked:  cuzz send --channel hitl     --kind alert   --content "PR #N needs a decision: X or Y"
                          …and also open the GitHub issue. cuzz does not replace it.
+  To reach a specific peer, @name them (@merger, @rebaser) — it becomes a
+  queryable field, so they can find it without reading the whole room.
   Post meaningful state changes only. Do not narrate. Do not poll.
 ```
 

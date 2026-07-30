@@ -18,6 +18,7 @@ func guide_json() (s) {
         "{\"n\":7,\"name\":\"presence\",\"use\":\"'agent-1 online, working on #726'\"}]" +
         ",\"workflow\":{" +
         "\"at_run_start\":\"cuzz get --channel am-fleet --since $LAST_WATERMARK — the reply carries a `watermark` field; save it and pass it back next run\"," +
+        "\"what_needs_me\":\"cuzz get --mentions me --since $LAST_WATERMARK — only messages that @-tagged you. 'me' resolves from your token. Tag a peer by writing @their-name in the content.\"," +
         "\"when_you_start\":\"cuzz send --channel am-fleet --kind message --content \\\"starting #818\\\"\"," +
         "\"when_you_finish\":\"cuzz send --channel am-fleet --kind status --content \\\"PR #818 opened, MERGEABLE\\\"\"," +
         "\"when_you_are_blocked\":\"cuzz send --channel hitl --kind alert --content \\\"PR #823 needs a CEO decision\\\" — and ALSO open the GitHub issue; cuzz mirrors escalations, it does not own them\"," +
@@ -41,6 +42,7 @@ func llms_txt() (s) {
         "- `GET /api/messages?channel=&kind=&since=&q=&limit=` — messages in ascending time order.\n" +
         "  The reply's `watermark` is the highest timestamp returned; pass it back as `since` next time.\n" +
         "  `tail=N` returns the NEWEST n instead (still ascending) — what you want on a first read,\n" +
+        "  `mentions=<name|me>` filters to messages that @-tagged that identity.\n" +
         "  since `limit=N` alone gives the OLDEST n.\n" +
         "- `POST /api/messages` — `{\"channel\":\"am-fleet\",\"kind\":\"status\",\"content\":\"...\",\"reply_to\":\"\"}`.\n" +
         "  The author comes from the token unless the body names one.\n" +
@@ -85,7 +87,7 @@ func cmd_help_json() {
         "{\"name\":\"init\",\"summary\":\"create the database, the default channels and the tokens\",\"flags\":[\"--agents <csv>\"]}," +
         "{\"name\":\"token\",\"summary\":\"mint or show an agent bearer token (over HTTP; needs an admin credential)\",\"flags\":[\"--agent <name>\",\"--role admin|editor\",\"--list\",\"--local\"]}," +
         "{\"name\":\"send\",\"summary\":\"append a message to a channel\",\"flags\":[\"--channel\",\"--kind\",\"--content\",\"--author\",\"--reply-to\",\"--local\"]}," +
-        "{\"name\":\"get\",\"summary\":\"read messages, oldest first, with a resumable watermark\",\"flags\":[\"--channel\",\"--kind\",\"--since\",\"--limit\",\"--tail\",\"--local\"]}," +
+        "{\"name\":\"get\",\"summary\":\"read messages, oldest first, with a resumable watermark\",\"flags\":[\"--channel\",\"--kind\",\"--since\",\"--limit\",\"--tail\",\"--mentions\",\"--local\"]}," +
         "{\"name\":\"search\",\"summary\":\"case-insensitive substring search over message content\",\"flags\":[\"--query\",\"--channel\",\"--limit\"]}," +
         "{\"name\":\"watch\",\"summary\":\"poll a channel and stream new messages to stdout until killed\",\"flags\":[\"--channel\",\"--since\",\"--interval\"]}," +
         "{\"name\":\"channels\",\"summary\":\"list, create or delete channels\",\"flags\":[\"--create <name>\",\"--delete <name>\",\"--yes\"]}," +

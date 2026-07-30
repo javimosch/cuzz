@@ -8,7 +8,7 @@ binary: REST for agents, a chat page for the human, SSE for both.
 export CUZZ_DB=./cuzz.data
 ./cuzz guide                # mental model (JSON) — read this, not the README
 ./cuzz help-json            # command catalog
-./test.sh                   # 80-assertion smoke: storage, REST, SSE, auth, SIGKILL
+./test.sh                   # 90-assertion smoke: storage, REST, SSE, auth, SIGKILL
 ```
 
 ## Constraints

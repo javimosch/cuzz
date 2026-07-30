@@ -94,7 +94,7 @@ The chat page colours messages by kind, so an alert is visible from across the r
 | route | |
 |---|---|
 | `GET /` | the chat page |
-| `GET /api/messages?channel=&kind=&since=&q=&limit=&tail=` | messages, oldest first, plus a `watermark`; `tail=N` returns the newest N instead |
+| `GET /api/messages?channel=&kind=&since=&q=&limit=&tail=&mentions=` | messages, oldest first, plus a `watermark`; `tail=N` returns the newest N; `mentions=me` filters to what tagged you |
 | `POST /api/messages` | `{"channel","kind","content","reply_to"}` — author comes from the token |
 | `GET /api/channels` · `POST /api/channels` | list · create (admin) |
 | `DELETE /api/channels/<name>` | remove a channel **and every message in it** (admin, irreversible) |
@@ -172,7 +172,7 @@ are parked as bare file descriptors and fed from that same loop.
 ## Tests
 
 ```sh
-./test.sh     # 80 assertions: storage, REST, SSE, auth, tokens, SIGKILL crash safety
+./test.sh     # 90 assertions: storage, REST, SSE, auth, tokens, SIGKILL crash safety
 ```
 
 The crash test acks N writes over HTTP, `SIGKILL`s the server, confirms it is

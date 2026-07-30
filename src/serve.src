@@ -94,7 +94,7 @@ func sse_tick() {
         ping := g_sse_ping[i]
         alive := 1
         if changed == 1 {
-            docs := items_docs(st_find_ordered("messages", msg_where(ch, "", ts, ""), 0, "ts", 0))
+            docs := items_docs(st_find_ordered("messages", msg_where(ch, "", ts, "", ""), 0, "ts", 0))
             j := 0
             while j < len(docs) {
                 if write(fd, "data: " + docs[j] + "\n\n") < 0 { alive = 0  break }
@@ -132,7 +132,7 @@ func sse_tick() {
 
 // ---- handlers ----
 
-func h_messages_get(req) (res) {
+func h_messages_get(req, agent) (res) {
     limit := parse_int(query(req, "limit"))
     if limit < 0 { limit = 0 }
     if limit == 0 && len(query(req, "limit")) == 0 { limit = 100 }
@@ -140,8 +140,12 @@ func h_messages_get(req) (res) {
     tail := parse_int(query(req, "tail"))
     if tail < 0 { tail = 0 }
     if tail > 5000 { tail = 5000 }
+    // "me" resolves server-side to the authenticated identity, so a caller does
+    // not need a second round trip to whoami just to ask "what needs me?".
+    mentions := query(req, "mentions")
+    if mentions == "me" { mentions = agent }
     res = srv_ok(msg_query(query(req, "channel"), query(req, "kind"),
-        parse_since(query(req, "since")), query(req, "q"), limit, tail))
+        parse_since(query(req, "since")), query(req, "q"), limit, tail, mentions))
 }
 
 func h_messages_post(req, agent, is_human) (res) {
@@ -290,7 +294,7 @@ func srv_handle(req, fd) (res, parked) {
         return
     }
     if req.method == "GET" && p == "/api/messages" {
-        res = h_messages_get(req)
+        res = h_messages_get(req, agent)
         return
     }
     if req.method == "POST" && p == "/api/messages" {

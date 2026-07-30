@@ -48,6 +48,7 @@ func ensure_schema() (ok) {
     if st_index("messages", "channel", "") == 0 { return }
     if st_index("messages", "kind", "") == 0 { return }
     if st_index("messages", "ts", "range") == 0 { return }
+    if st_index("messages", "mentions", "") == 0 { return }
     if st_index("channels", "name", "") == 0 { return }
     if st_index("tokens", "agent", "") == 0 { return }
     ok = 1
@@ -121,6 +122,64 @@ func chan_delete(name) (nmsgs, errcode, errmsg) {
     }
 }
 
+// ---- mentions ----
+// An @name is only registered if it resolves to a real speaker. An unresolvable
+// @typo stays visible in the content but must not create a phantom addressee —
+// the same reasoning that made channel auto-create need a delete verb.
+func mention_ok(name) (yes) {
+    yes = 0
+    if len(name) == 0 { return }
+    human := env("CUZZ_HUMAN")
+    if len(human) == 0 { human = "human" }
+    if name == human { yes = 1  return }
+    _, found := tok_for_agent(name)
+    if found == 1 { yes = 1 }
+}
+
+// parse_mentions returns (delimited, list). The delimited form "|a|b|" is what
+// gets stored and queried: grange indexes scalar tokens, so an array field could
+// not be matched at all, whereas "mentions~=|a|" reuses the substring operator
+// that already exists. The list is for display only — never query it.
+func parse_mentions(content) (delim, list) {
+    delim = ""
+    list = []string{}
+    names := []string{}
+    i := 0
+    n := len(content)
+    while i < n {
+        if charat(content, i) != "@" {
+            i = i + 1
+            continue
+        }
+        j := i + 1
+        name := ""
+        while j < n {
+            c := to_lower(charat(content, j))
+            good := 0
+            if c >= "a" && c <= "z" { good = 1 }
+            if c >= "0" && c <= "9" { good = 1 }
+            if c == "-" || c == "_" { good = 1 }
+            if good == 0 { break }
+            name = name + c
+            j = j + 1
+        }
+        if len(name) > 0 && mention_ok(name) == 1 {
+            dup := 0
+            k := 0
+            while k < len(names) {
+                if names[k] == name { dup = 1 }
+                k = k + 1
+            }
+            if dup == 0 {
+                names = append(names, name)
+                list = append(list, "\"" + name + "\"")
+            }
+        }
+        i = j
+    }
+    if len(names) > 0 { delim = "|" + join(names, "|") + "|" }
+}
+
 // ---- messages ----
 
 func msg_id() (id) {
@@ -167,9 +226,11 @@ func msg_append(channel, author, kindStr, content, reply_to) (doc, errcode, errm
     }
     id := msg_id()
     ms := now_ms()
+    mdelim, mlist := parse_mentions(content)
     d := "{\"id\":\"" + id + "\",\"channel\":\"" + channel + "\",\"author\":\"" + author + "\"" +
         ",\"kind\":" + str(k) + ",\"kind_name\":\"" + kind_name(k) + "\"" +
         ",\"content\":\"" + jesc_c(content) + "\",\"reply_to\":\"" + jesc_c(reply_to) + "\"" +
+        ",\"mentions\":\"" + mdelim + "\",\"mentions_list\":[" + join(mlist, ",") + "]" +
         ",\"ts\":" + str(ms) + ",\"created_at\":\"" + iso_ms(ms) + "\"}"
     if st_put("messages", id, d) == 0 {
         errcode = 110
@@ -182,7 +243,7 @@ func msg_append(channel, author, kindStr, content, reply_to) (doc, errcode, errm
 // msg_query builds a grange where-clause from the filter set. Clauses are
 // ANDed; `channel` and `kind` hit equality indexes, `since` ranges on ts, and
 // `q` is a case-insensitive substring over content.
-func msg_where(channel, kindStr, since, q) (where) {
+func msg_where(channel, kindStr, since, q, mentions) (where) {
     cl := []string{}
     if len(channel) > 0 { cl = append(cl, "channel=" + channel) }
     if len(kindStr) > 0 {
@@ -191,6 +252,8 @@ func msg_where(channel, kindStr, since, q) (where) {
     }
     if since > 0 { cl = append(cl, "ts>" + str(since)) }
     if len(q) > 0 { cl = append(cl, "content~=" + q) }
+    // matched against the delimited form so @build does not match @builder
+    if len(mentions) > 0 { cl = append(cl, "mentions~=|" + to_lower(mentions) + "|") }
     where = join(cl, ",")
 }
 
@@ -199,8 +262,8 @@ func msg_where(channel, kindStr, since, q) (where) {
 // express: results are ascending, so `--since 0 --limit 100` hands back the
 // hundred OLDEST messages and then parks the watermark just past them. An agent
 // with no watermark wants the end of the conversation, not the start of it.
-func msg_query(channel, kindStr, since, q, limit, tail) (data) {
-    where := msg_where(channel, kindStr, since, q)
+func msg_query(channel, kindStr, since, q, limit, tail, mentions) (data) {
+    where := msg_where(channel, kindStr, since, q, mentions)
     if limit < 0 { limit = 0 }
     docs := []string{}
     if tail > 0 {

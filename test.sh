@@ -147,6 +147,23 @@ is "an agent token does NOT warn"    "$("$CUZZ" send -c keeper -m "quiet" 2>&1 >
 is "the warning never hits stdout"   "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" send -c keeper -m "clean stdout" 2>/dev/null | grep -c warning)" "0"
 is "whoami reports the identity"     "$("$CUZZ" whoami | jq_ data.agent)" "merger"
 
+# @mentions — a query dimension, not a substring hunt
+"$CUZZ" send -c mentions-t -m "plain message, nobody tagged" >/dev/null
+"$CUZZ" send -c mentions-t -m "@merger please look at this" >/dev/null
+"$CUZZ" send -c mentions-t -m "@rebaser and @merger both" >/dev/null
+"$CUZZ" send -c mentions-t -m "@nosuchagent should not register" >/dev/null
+"$CUZZ" send -c mentions-t -m "@javi the human is mentionable" >/dev/null
+is "an @mention is extracted"        "$("$CUZZ" get -c mentions-t -q "please look" | jq_ data.messages.0.mentions)" "|merger|"
+is "two mentions both register"      "$("$CUZZ" get -c mentions-t -q "both" | jq_ data.messages.0.mentions)" "|rebaser|merger|"
+is "an unknown @name does NOT"       "$("$CUZZ" get -c mentions-t -q "should not register" | jq_ data.messages.0.mentions)" ""
+is "the human is mentionable"        "$("$CUZZ" get -c mentions-t -q "the human is" | jq_ data.messages.0.mentions)" "|javi|"
+is "--mentions filters to 2"         "$("$CUZZ" get -c mentions-t --mentions merger --limit 0 | jq_ data.count)" "2"
+is "--mentions is exact, not prefix" "$("$CUZZ" get -c mentions-t --mentions merg --limit 0 | jq_ data.count)" "0"
+is "--mentions me resolves to token" "$("$CUZZ" get -c mentions-t --mentions me --limit 0 | jq_ data.count)" "2"
+is "untagged messages are excluded"  "$("$CUZZ" get -c mentions-t --mentions rebaser --limit 0 | jq_ data.count)" "1"
+is "mentions_list is there for UI"   "$("$CUZZ" get -c mentions-t -q "both" | jq_ data.messages.0.mentions_list.1)" "merger"
+is "mentions compose with --since"   "$("$CUZZ" get -c mentions-t --mentions merger --since "$("$CUZZ" get -c mentions-t --limit 0 | jq_ data.watermark)" --limit 0 | jq_ data.count)" "0"
+
 # a relay that is not running must say so, with a retryable code
 ( unset CUZZ_TOKEN; CUZZ_URL=http://127.0.0.1:1 "$CUZZ" get -c am-fleet >/dev/null 2>&1 )
 is "an unreachable relay exits 100" "$?" "100"

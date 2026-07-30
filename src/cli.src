@@ -223,14 +223,23 @@ func get_query(fs) (qs) {
     if len(q) > 0 { qs = qs + "&q=" + url_encode(q) }
     t := flag_int_val(fs, "tail")
     if t > 0 { qs = qs + "&tail=" + str(t) }
+    mn := flag_get(fs, "mentions")
+    if len(mn) > 0 { qs = qs + "&mentions=" + url_encode(mn) }
 }
 
 func run_read(fs) {
     limit := flag_int_val(fs, "limit")
     if limit < 0 { limit = 0 }
     if flag_on(fs, "local") || cli_local() == 1 {
+        // the relay resolves "me" from the token; --local has no token to ask
+        if flag_get(fs, "mentions") == "me" {
+            who := env("CUZZ_AGENT")
+            if len(who) == 0 { who, _ = tok_lookup(cli_token()) }
+            fs.val["mentions"] = who
+        }
         out_ok(msg_query(flag_get(fs, "channel"), flag_get(fs, "kind"),
-            parse_since(flag_get(fs, "since")), flag_get(fs, "query"), limit, flag_int_val(fs, "tail")))
+            parse_since(flag_get(fs, "since")), flag_get(fs, "query"), limit,
+            flag_int_val(fs, "tail"), flag_get(fs, "mentions")))
     }
     out_ok(http_call("GET", "/api/messages" + get_query(fs), ""))
 }
@@ -243,6 +252,7 @@ func read_flags(prog) (fs) {
     fs = flag_str(fs, "query", "q", "", "case-insensitive substring of the content")
     fs = flag_int(fs, "limit", "n", "100", "max messages, oldest first (0 = no cap)")
     fs = flag_int(fs, "tail", "t", "0", "return the NEWEST n instead — what you want when you have no watermark")
+    fs = flag_str(fs, "mentions", "m", "", "only messages that @-mention this name (use \"me\" for your own)")
     fs = flag_bool(fs, "local", "", "read the grange file directly instead of the relay")
 }
 
@@ -350,7 +360,7 @@ func cmd_watch(args) {
     for {
         data := ""
         if local == 1 {
-            data = msg_query(flag_get(fs, "channel"), flag_get(fs, "kind"), since, flag_get(fs, "query"), 0, 0)
+            data = msg_query(flag_get(fs, "channel"), flag_get(fs, "kind"), since, flag_get(fs, "query"), 0, 0, flag_get(fs, "mentions"))
         } else {
             fs.val["since"] = str(since)
             fs.val["limit"] = "0"
