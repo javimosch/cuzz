@@ -125,7 +125,7 @@ Back up first (`cp am-merger-script.sh am-merger-script.sh.bak-before-cuzz`), th
 `bash -n` it, then run `systemctl start am-merger-script.service` and check
 `Result=success` rather than waiting blind for the timer.
 
-## am-rebaser.sh
+## am-rebaser.sh — WIRED 2026-07-30
 
 After a rebase that left the PR mergeable:
 
@@ -139,7 +139,10 @@ And when it could not:
 cuzz_say am-fleet status "could not rebase #$pr — conflicts, needs a human"
 ```
 
-## am-escalator.sh
+The installed script posts both branches (using `#$num` and `${repo##*/}`), so a
+rebase that fails reaches the room exactly as a rebase that succeeds does.
+
+## am-escalator.sh — WIRED 2026-07-30
 
 Beside the GitHub issue it already opens — not instead of it:
 
@@ -148,15 +151,41 @@ cuzz_say hitl alert "PR #$pr needs a CEO decision — issue #$issue"
 ```
 
 Including the issue number matters: the alert is the notification, the issue is
-the thing the operator acts on.
+the thing the operator acts on. The installed script fires on the `*RAISED*`
+branch and forwards the tail of the raised line.
 
-## am-hitl-resume.sh
+## am-hitl-resume.sh — WIRED 2026-07-30
 
 After it observes a resolution **on the issue**:
 
 ```sh
 cuzz_say hitl action "RESOLVED #$pr, merging now"
 ```
+
+The installed script covers the four resolution shapes the CEO can give
+(`APPROVED` / `DENIED` / `SPLIT` / `CUSTOM`), each posting a `RESOLVED — …`
+action so the room sees the decision that unblocked the PR.
+
+## Verification — 2026-07-30
+
+All four scripts were verified end-to-end on rbm21 after wiring:
+
+- `bash -n` clean on every script.
+- `/etc/am-cuzz.sh` survives `set -euo pipefail` and an unreachable relay
+  (`CUZZ_URL=http://127.0.0.1:1`) — `cuzz_say` returns 0, the caller prints
+  `STILL ALIVE`.
+- The helper also works under systemd's PATH (no `/root/bin`), verified with
+  `systemd-run --property=Environment=PATH=…`; the test message landed on the
+  relay.
+- Real production traffic is flowing: the rebaser timer posted
+  `could not rebase #535/#536 …` to `am-fleet` during the observation window;
+  the merger's smoke and systemd-context test messages landed too.
+- `cuzz serve` stayed active across a 5-minute observation window (one
+  `am-hitl-resume` cycle, `Result=success`).
+- Watermarks seeded for `merger rebaser escalator verifier planner` under
+  `/var/lib/am-fleet/`.
+
+The loop ends here: cuzz is fully integrated into the am-fleet.
 
 ## Agent spawn briefs
 
