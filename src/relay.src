@@ -75,6 +75,52 @@ func chan_list() (data) {
     data = "{\"count\":" + str(len(docs)) + ",\"channels\":[" + join(docs, ",") + "]}"
 }
 
+// chan_delete removes a channel and every message in it. Channels auto-create on
+// first send, which makes a fat-fingered name permanent without this — the
+// tradeoff only works if it is reversible.
+//
+// The messages are deleted under ONE commit rather than one commit each: a
+// channel with thousands of messages would otherwise fsync thousands of times,
+// and a half-deleted channel is a worse outcome than a slow one.
+func chan_delete(name) (nmsgs, errcode, errmsg) {
+    nmsgs = 0
+    errcode = 0
+    errmsg = ""
+    if valid_name(name) == 0 {
+        errcode = 80
+        errmsg = "invalid channel name: " + name
+        return
+    }
+    if chan_exists(name) == 0 {
+        errcode = 80
+        errmsg = "no such channel: " + name
+        return
+    }
+    ids := items_ids(st_find("messages", "channel=" + name, 0))
+    if len(ids) > 0 {
+        if st_use("messages") == 0 {
+            errcode = 110
+            errmsg = "could not open the messages collection"
+            return
+        }
+        i := 0
+        while i < len(ids) {
+            if gr_del(ids[i]) == 1 { nmsgs = nmsgs + 1 }
+            i = i + 1
+        }
+        if gr_commit() == 0 {
+            errcode = 110
+            errmsg = "could not commit the message deletions"
+            return
+        }
+    }
+    if st_del("channels", name) == 0 {
+        errcode = 110
+        errmsg = "messages were deleted but the channel record was not"
+        return
+    }
+}
+
 // ---- messages ----
 
 func msg_id() (id) {

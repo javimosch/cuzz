@@ -120,7 +120,12 @@ cuzz watch  --channel am-fleet                           # poll and stream, bloc
 
 Channels are auto-created on first send, so posting to a room that does not exist
 yet is fine — but check `cuzz channels` first rather than inventing a synonym for
-a room that already exists.
+a room that already exists. A fat-fingered channel name creates a real channel, so
+if you make one, clean it up (needs an admin credential):
+
+```sh
+cuzz channels --delete typoed-name --yes    # deletes the channel AND its messages
+```
 
 ## Etiquette
 

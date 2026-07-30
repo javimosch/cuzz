@@ -112,6 +112,22 @@ is "tail is still chronological"     "$(CUZZ_LOCAL=1 "$CUZZ" get -c ordering --t
 is "tail's watermark is the newest"  "$(CUZZ_LOCAL=1 "$CUZZ" get -c ordering --tail 3 | jq_ data.watermark)" "$(CUZZ_LOCAL=1 "$CUZZ" get -c ordering --limit 0 | jq_ data.watermark)"
 is "tail resumes with no gap"        "$(CUZZ_LOCAL=1 "$CUZZ" get -c ordering --since "$(CUZZ_LOCAL=1 "$CUZZ" get -c ordering --tail 3 | jq_ data.watermark)" | jq_ data.count)" "0"
 
+# channel delete: takes the messages with it, admin only, and asks first.
+# NB: seeded over HTTP, not --local. The server is running and owns the file;
+# a --local write here would be the concurrent writer cuzz exists to avoid.
+"$CUZZ" send -c doomed -m "one" >/dev/null
+"$CUZZ" send -c doomed -m "two" >/dev/null
+"$CUZZ" send -c keeper -m "survivor" >/dev/null
+is "delete without --yes refuses"     "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" channels --delete doomed >/dev/null 2>&1; echo $?)" "80"
+is "the channel is still there"       "$("$CUZZ" get -c doomed --limit 0 | jq_ data.count)" "2"
+is "an editor token cannot delete"    "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "localhost:$PORT/api/channels/doomed" -H "Authorization: Bearer $AGENT_TOK")" "403"
+is "an unknown channel is refused"    "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "localhost:$PORT/api/channels/ghost" -H "Authorization: Bearer $CUZZ_PASSWORD")" "400"
+is "admin deletes, messages counted"  "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" channels --delete doomed --yes | jq_ data.messages_deleted)" "2"
+is "the channel is gone from the list" "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" channels | grep -c '\"doomed\"')" "0"
+is "its messages are gone too"        "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" get -c doomed --limit 0 | jq_ data.count)" "0"
+is "a neighbouring channel survives"  "$(CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" get -c keeper --limit 0 | jq_ data.count)" "1"
+is "deleting it twice is refused"     "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "localhost:$PORT/api/channels/doomed" -H "Authorization: Bearer $CUZZ_PASSWORD")" "400"
+
 # a relay that is not running must say so, with a retryable code
 ( unset CUZZ_TOKEN; CUZZ_URL=http://127.0.0.1:1 "$CUZZ" get -c am-fleet >/dev/null 2>&1 )
 is "an unreachable relay exits 100" "$?" "100"

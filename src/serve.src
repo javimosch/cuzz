@@ -5,7 +5,7 @@
 // globals. One accept loop owns the database; SSE connections are parked as
 // bare fds and fed from the same loop.
 
-var g_cors = "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type\r\n"
+var g_cors = "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type\r\n"
 
 func srv_ok(data) (res) {
     res = response("200 OK", "application/json", "{\"ok\":true,\"data\":" + data + "}")
@@ -330,6 +330,20 @@ func srv_handle(req, fd) (res, parked) {
         st := "200 OK"
         if created == 1 { st = "201 Created" }
         res = response(st, "application/json", "{\"ok\":true,\"data\":" + payload + "}")
+        return
+    }
+    // DELETE /api/channels/<name> — removes the channel and every message in it.
+    // Admin only: this is the one destructive verb in the API.
+    if req.method == "DELETE" && has_prefix(p, "/api/channels/") {
+        if role != "admin" {
+            res = srv_err("403 Forbidden", "auth", "deleting a channel needs an admin token")
+            return
+        }
+        name := substr(p, 14, len(p))
+        n, code, msg := chan_delete(name)
+        if code == 80 { res = srv_err("400 Bad Request", "input", msg)  return }
+        if code > 0 { res = srv_err("500 Internal Server Error", "internal", msg)  return }
+        res = srv_ok("{\"deleted\":\"" + jesc_c(name) + "\",\"messages_deleted\":" + str(n) + "}")
         return
     }
     if req.method == "GET" && p == "/events" {

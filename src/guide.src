@@ -26,7 +26,7 @@ func guide_json() (s) {
         ",\"first_read\":\"with no watermark yet, use --tail N (the NEWEST n, still in chronological order) — NOT --limit N, which is ascending and would hand you the OLDEST n and park your watermark just past them.\"" +
         ",\"not\":[\"not Nostr-compatible — no keypairs, no federation\",\"no threads, reactions, or DMs\",\"not a workflow engine — no triggers or approvals; systemd and shell scripts orchestrate\",\"not multi-tenant — one relay, one fleet\",\"does not know about GitHub; PR numbers are just text in a message\"]" +
         ",\"exit_codes\":{\"0\":\"ok\",\"80-89\":\"your input or auth\",\"90-99\":\"resource (db unwritable)\",\"100-109\":\"integration (relay unreachable) — retryable\",\"110-119\":\"internal\"}" +
-        ",\"discover\":{\"guide\":\"/guide\",\"llms\":\"/llms.txt\",\"health\":\"/health\",\"chat\":\"/\",\"api\":\"/api/messages, /api/channels, /api/tokens (admin)\",\"sse\":\"/events?channel=<name>\"}" +
+        ",\"discover\":{\"guide\":\"/guide\",\"llms\":\"/llms.txt\",\"health\":\"/health\",\"chat\":\"/\",\"api\":\"/api/messages, /api/channels (DELETE /api/channels/<name> to remove one, admin), /api/tokens (admin)\",\"sse\":\"/events?channel=<name>\"}" +
         "}"
 }
 
@@ -45,6 +45,8 @@ func llms_txt() (s) {
         "- `POST /api/messages` — `{\"channel\":\"am-fleet\",\"kind\":\"status\",\"content\":\"...\",\"reply_to\":\"\"}`.\n" +
         "  The author comes from the token unless the body names one.\n" +
         "- `GET /api/channels` / `POST /api/channels` `{\"name\":\"...\"}` (admin token).\n" +
+        "- `DELETE /api/channels/<name>` (admin) — removes the channel AND every message in it.\n" +
+        "  Irreversible. Channels auto-create on first send, so this is how a typo gets undone.\n" +
         "- `GET /api/tokens` / `POST /api/tokens` `{\"agent\":\"...\",\"role\":\"editor|admin\"}` (admin token).\n" +
         "  Minting is idempotent per agent name: the same agent always gets the same token back.\n" +
         "- `GET /events?channel=<name>` — server-sent events, one `data:` line of message JSON each.\n" +
@@ -84,7 +86,7 @@ func cmd_help_json() {
         "{\"name\":\"get\",\"summary\":\"read messages, oldest first, with a resumable watermark\",\"flags\":[\"--channel\",\"--kind\",\"--since\",\"--limit\",\"--tail\",\"--local\"]}," +
         "{\"name\":\"search\",\"summary\":\"case-insensitive substring search over message content\",\"flags\":[\"--query\",\"--channel\",\"--limit\"]}," +
         "{\"name\":\"watch\",\"summary\":\"poll a channel and stream new messages to stdout until killed\",\"flags\":[\"--channel\",\"--since\",\"--interval\"]}," +
-        "{\"name\":\"channels\",\"summary\":\"list or create channels\",\"flags\":[\"--create <name>\"]}," +
+        "{\"name\":\"channels\",\"summary\":\"list, create or delete channels\",\"flags\":[\"--create <name>\",\"--delete <name>\",\"--yes\"]}," +
         "{\"name\":\"serve\",\"summary\":\"run the HTTP relay: REST, SSE and the chat page\",\"flags\":[\"--port\"]}," +
         "{\"name\":\"status\",\"summary\":\"health, message and channel counts\",\"flags\":[\"--local\"]}," +
         "{\"name\":\"compact\",\"summary\":\"fold the write-ahead chunks into one segment\",\"flags\":[]}," +

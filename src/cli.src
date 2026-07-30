@@ -223,11 +223,31 @@ func cmd_search(args) {
 func cmd_channels(args) {
     fs := new_flags("channels")
     fs = flag_str(fs, "create", "", "", "create a channel")
+    fs = flag_str(fs, "delete", "", "", "delete a channel AND every message in it (needs --yes)")
+    fs = flag_bool(fs, "yes", "y", "confirm a delete — it is irreversible")
     fs = flag_bool(fs, "local", "", "use the grange file directly")
     fs = parse_flags(fs, args)
 
     name := flag_get(fs, "create")
-    if flag_on(fs, "local") || cli_local() == 1 {
+    gone := flag_get(fs, "delete")
+    local := 0
+    if flag_on(fs, "local") || cli_local() == 1 { local = 1 }
+
+    // Deleting takes messages with it and there is no undo, so it asks. Every
+    // other verb here is non-destructive and does not.
+    if len(gone) > 0 {
+        if flag_on(fs, "yes") == false {
+            out_err(80, "input", "deleting #" + gone + " also deletes every message in it, and cannot be undone",
+                "re-run with --yes if that is what you want")
+        }
+        if local == 1 {
+            n, code, msg := chan_delete(gone)
+            if code > 0 { out_err(code, "input", msg, "") }
+            out_ok("{\"deleted\":\"" + gone + "\",\"messages_deleted\":" + str(n) + "}")
+        }
+        out_ok(http_call("DELETE", "/api/channels/" + url_encode(gone), ""))
+    }
+    if local == 1 {
         if len(name) > 0 {
             if chan_create(name) == 0 { out_err(80, "input", "invalid channel name: " + name, "use a-z 0-9 - _") }
             out_ok("{\"created\":\"" + name + "\"}")

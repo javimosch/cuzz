@@ -79,6 +79,21 @@ func st_wal_chunks(coll) (n) {
     }
 }
 
+// items_ids pulls the .id of every row, for the cases that must address
+// documents rather than read them (deletion).
+func items_ids(data) (ids) {
+    ids = []string{}
+    cv, cerr := json_get(data, ".count")
+    if len(cerr) > 0 { return }
+    n := parse_int(cv)
+    i := 0
+    while i < n {
+        v, err := json_get(data, ".items[" + str(i) + "].id")
+        if len(err) == 0 { ids = append(ids, unq(v)) }
+        i = i + 1
+    }
+}
+
 // items_docs pulls the .doc of every row out of a grange result envelope, so
 // callers hand back plain message objects instead of {id,doc} pairs.
 func items_docs(data) (docs) {
