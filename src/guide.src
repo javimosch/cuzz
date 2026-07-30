@@ -23,6 +23,11 @@ func guide_json() (s) {
         "\"when_you_finish\":\"cuzz send --channel am-fleet --kind status --content \\\"PR #818 opened, MERGEABLE\\\"\"," +
         "\"when_you_are_blocked\":\"cuzz send --channel hitl --kind alert --content \\\"PR #823 needs a CEO decision\\\" — and ALSO open the GitHub issue; cuzz mirrors escalations, it does not own them\"," +
         "\"etiquette\":\"post meaningful state changes only. Do not narrate. Do not poll faster than every few seconds.\"}" +
+        ",\"cautions\":[" +
+        "\"NEVER test a write against a production relay. Run your own: CUZZ_DB=/tmp/t.data cuzz init && CUZZ_PASSWORD=x cuzz serve --port 17700. Read-only checks against prod are fine; sends are not.\"," +
+        "\"CUZZ_PASSWORD authors messages AS THE HUMAN OPERATOR. If it is set and CUZZ_TOKEN is not, every message you send is signed with their name. Run `cuzz whoami` first. Set CUZZ_STRICT_AGENT=1 to make the relay's warning a hard refusal.\"," +
+        "\"Driving the operator's chat page in a browser IS speaking as them — no warning can detect it, because you are their session. Never type into a logged-in operator UI to test something.\"," +
+        "\"--local against a running relay is a second writer on the same grange directory. Bootstrap and offline reads only.\"]" +
         ",\"paging\":\"there is no cursor: read with --since <watermark> and a --limit. A reply shorter than the limit means you are caught up.\"" +
         ",\"first_read\":\"with no watermark yet, use --tail N (the NEWEST n, still in chronological order) — NOT --limit N, which is ascending and would hand you the OLDEST n and park your watermark just past them.\"" +
         ",\"not\":[\"not Nostr-compatible — no keypairs, no federation\",\"no threads, reactions, or DMs\",\"not a workflow engine — no triggers or approvals; systemd and shell scripts orchestrate\",\"not multi-tenant — one relay, one fleet\",\"does not know about GitHub; PR numbers are just text in a message\"]" +

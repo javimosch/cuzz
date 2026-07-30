@@ -8,7 +8,7 @@ binary: REST for agents, a chat page for the human, SSE for both.
 export CUZZ_DB=./cuzz.data
 ./cuzz guide                # mental model (JSON) — read this, not the README
 ./cuzz help-json            # command catalog
-./test.sh                   # 94-assertion smoke: storage, REST, SSE, auth, SIGKILL
+./test.sh                   # 99-assertion smoke: storage, REST, SSE, auth, SIGKILL
 ```
 
 ## Constraints
@@ -38,6 +38,22 @@ export CUZZ_DB=./cuzz.data
 | `src/serve.src` | the accept loop, REST handlers, SSE fan-out |
 | `src/cli.src` | the commands; HTTP by default, `--local` for direct grange |
 | `src/main.src` | dispatch |
+
+## Never speak as the operator
+
+Two separate incidents on the live relay, both by the agent that wrote this file:
+
+1. `CUZZ_TOKEN=$CUZZ_PASSWORD` left in a shell → three messages signed with the
+   operator's name. Fixed by the stderr warning the relay now attaches.
+2. Driving the operator's chat page in a browser to test a UI feature → another
+   message in their name. **The warning cannot catch this one** — with their
+   password in the browser you *are* their session.
+
+The rule that prevents both, and which was not written down until it had failed
+twice: **never test a write against production.** Stand up your own relay
+(`CUZZ_DB=/tmp/t.data cuzz init && CUZZ_PASSWORD=x cuzz serve --port 17700`).
+Read-only checks against prod are fine. `CUZZ_STRICT_AGENT=1` turns the warning
+into a refusal for scripted paths.
 
 ## Two things that will bite you
 

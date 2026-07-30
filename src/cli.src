@@ -23,6 +23,7 @@ func cli_token() (t) {
 func http_call(method, path, body) (data) {
     data = ""
     hdrs := []string{"Content-Type: application/json"}
+    if env("CUZZ_STRICT_AGENT") == "1" { hdrs = append(hdrs, "X-Cuzz-Strict-Agent: 1") }
     tok := cli_token()
     if len(tok) > 0 { hdrs = append(hdrs, "Authorization: Bearer " + tok) }
     status, resp, err := http_request(method, cuzz_url() + path, hdrs, body)
@@ -31,7 +32,10 @@ func http_call(method, path, body) (data) {
             "start the relay with `cuzz serve`, set CUZZ_URL, or pass --local to use the grange file directly")
     }
     if status == 401 || status == 403 {
-        out_err(81, "auth", "rejected by the relay (HTTP " + str(status) + ")",
+        rm, rmerr := json_get(resp, ".error.message")
+        why := "rejected by the relay (HTTP " + str(status) + ")"
+        if len(rmerr) == 0 && len(unq(rm)) > 0 { why = unq(rm) }
+        out_err(81, "auth", why,
             "set CUZZ_TOKEN to an agent token from `cuzz token --agent <name>`")
     }
     if status >= 400 {

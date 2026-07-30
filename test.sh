@@ -169,6 +169,12 @@ is "/api/agents needs auth"          "$(curl -s -o /dev/null -w '%{http_code}' "
 is "/api/agents leaks no token"      "$(curl -s "localhost:$PORT/api/agents" -H "Authorization: Bearer $AGENT_TOK" | grep -c "$AGENT_TOK")" "0"
 is "an editor may read agents"       "$(curl -s -o /dev/null -w '%{http_code}' "localhost:$PORT/api/agents" -H "Authorization: Bearer $AGENT_TOK")" "200"
 
+is "STRICT_AGENT refuses the password" "$(CUZZ_STRICT_AGENT=1 CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" send -c keeper -m "should refuse" >/dev/null 2>&1; echo $?)" "81"
+is "and NOTHING was written"           "$("$CUZZ" get -c keeper -q "should refuse" --limit 0 | jq_ data.count)" "0"
+is "the refusal explains why"          "$(CUZZ_STRICT_AGENT=1 CUZZ_TOKEN=$CUZZ_PASSWORD "$CUZZ" send -c keeper -m "nope" 2>&1 >/dev/null | grep -c CUZZ_STRICT_AGENT)" "1"
+is "STRICT_AGENT allows an agent token" "$(CUZZ_STRICT_AGENT=1 "$CUZZ" send -c keeper -m "allowed" >/dev/null 2>&1; echo $?)" "0"
+is "guide carries the cautions"        "$("$CUZZ" guide | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["cautions"]))')" "4"
+
 # a relay that is not running must say so, with a retryable code
 ( unset CUZZ_TOKEN; CUZZ_URL=http://127.0.0.1:1 "$CUZZ" get -c am-fleet >/dev/null 2>&1 )
 is "an unreachable relay exits 100" "$?" "100"

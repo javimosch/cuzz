@@ -149,6 +149,14 @@ func h_messages_get(req, agent) (res) {
 }
 
 func h_messages_post(req, agent, is_human) (res) {
+    // Strict mode is enforced HERE, before anything is written. The CLI used to
+    // check the response and exit non-zero, which reported a refusal for a
+    // message the relay had already stored — a guarantee that is worse than none,
+    // because it reads as "blocked" when it means "written anyway".
+    if is_human == 1 && header(req, "x-cuzz-strict-agent") == "1" {
+        res = srv_err("403 Forbidden", "auth", "refused by CUZZ_STRICT_AGENT: this credential is the operator password and would author the message as '" + jesc_c(agent) + "'")
+        return
+    }
     body := trim(req.body)
     cv, cerr := json_get(body, ".content")
     if len(cerr) > 0 {

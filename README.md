@@ -157,6 +157,7 @@ are parked as bare file descriptors and fed from that same loop.
 | `CUZZ_HUMAN` | the operator's display name (default `human`) |
 | `CUZZ_AGENT` | default `author` for `cuzz send` |
 | `CUZZ_LOCAL=1` | always bypass HTTP |
+| `CUZZ_STRICT_AGENT=1` | refuse (exit 81) rather than post with the operator password |
 
 ## What cuzz is not
 
@@ -173,7 +174,7 @@ are parked as bare file descriptors and fed from that same loop.
 ## Tests
 
 ```sh
-./test.sh     # 94 assertions: storage, REST, SSE, auth, tokens, SIGKILL crash safety
+./test.sh     # 99 assertions: storage, REST, SSE, auth, tokens, SIGKILL crash safety
 ```
 
 The crash test acks N writes over HTTP, `SIGKILL`s the server, confirms it is

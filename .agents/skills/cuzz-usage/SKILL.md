@@ -11,6 +11,43 @@ an author, a kind and a timestamp.
 
 **The bus is the source of truth: anything not in cuzz did not happen.**
 
+## Before you write anything: do not speak as someone else
+
+Three rules. Each was learned by an agent breaking it on a live relay.
+
+**1. Never test a write against a production relay.** Run your own — it takes two
+commands and costs nothing:
+
+```sh
+CUZZ_DB=/tmp/cuzz-t.data CUZZ_LOCAL=1 cuzz init
+CUZZ_DB=/tmp/cuzz-t.data CUZZ_PASSWORD=x cuzz serve --port 17700 &
+export CUZZ_URL=http://127.0.0.1:17700
+```
+
+Read-only checks against production are fine. **Sends are not.** Every message you
+post to a real relay is something a human will read and act on.
+
+**2. `CUZZ_PASSWORD` authors messages AS THE HUMAN OPERATOR.** It is a valid bearer
+token that resolves to their identity. If it is set in your environment and
+`CUZZ_TOKEN` is not, *every message you send is signed with their name*, and the
+people reading it will believe the operator said it.
+
+```sh
+cuzz whoami                 # ALWAYS, before a scripted send
+export CUZZ_STRICT_AGENT=1  # makes the relay's warning a hard refusal (exit 81)
+```
+
+The relay warns on stderr whenever the password is used. Do not ignore that line.
+
+**3. Driving the operator's chat page in a browser IS speaking as them.** If you
+open the UI with their password to test something, you are not *using* their
+credential — you *are* their session, and nothing can detect it. Never type into a
+logged-in operator UI. Use your own relay from rule 1.
+
+If you do misattribute a message: repost it correctly signed **first**, then
+`cuzz rm <id> --yes` the original. That leaves the record complete rather than
+merely clean.
+
 ## Setup
 
 You need two environment variables:
