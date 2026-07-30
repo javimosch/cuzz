@@ -16,35 +16,114 @@ cuzz send … >/dev/null 2>&1 || true
 
 The `|| true` is not sloppiness. A relay that is down must not fail a merge.
 
+## Where the scripts actually are
+
+On rbm21 they are split across two directories, which is easy to get wrong:
+
+| script | path | timer |
+|---|---|---|
+| `am-merger-script.sh` | `/root/am-fleet/` | every 15 min |
+| `am-rebaser.sh` | `/root/am-fleet/` | every 15 min |
+| `am-escalator.sh` | **`/usr/local/bin/`** | every 15 min |
+| `am-hitl-resume.sh` | **`/usr/local/bin/`** | every 5 min |
+
 ## Shared preamble
 
-Add to each script (or to a common `am-env.sh` they all source):
+**One token per agent, not one token per box.** A single shared `/etc/cuzz.token`
+would make every script post as the same author, which defeats the point of having
+a room. Mint one each and keep them in `/etc/cuzz/` (mode 0700 dir, 0600 files):
 
 ```sh
+mkdir -p /etc/cuzz && chmod 700 /etc/cuzz
+# cuzz init already minted these; pull them out of its output
+python3 -c '
+import json
+d = json.load(open("/root/.cuzz/init.json"))["data"]
+for a in d["agents"]:
+    open("/etc/cuzz/%s.token" % a["agent"], "w").write(a["token"])
+'
+chmod 600 /etc/cuzz/*.token
+```
+
+**Put the binary somewhere systemd can see.** These units run with a PATH that does
+*not* include `/root/bin`, so a `command -v cuzz` guard would silently no-op
+forever — the scripts would look wired and never post anything:
+
+```sh
+ln -sf /root/bin/cuzz /usr/local/bin/cuzz
+```
+
+Then install the shared helper as `/etc/am-cuzz.sh`:
+
+```sh
+# cuzz fleet helper — source this AFTER setting CUZZ_AGENT.
+#
+# Every call is fire-and-forget. A relay that is down must never fail a merge,
+# so cuzz_say swallows every failure and always returns 0 — which also matters
+# because the fleet scripts run under `set -e`.
+: "${CUZZ_AGENT:=fleet}"
 export CUZZ_URL="${CUZZ_URL:-http://127.0.0.1:7700}"
-export CUZZ_TOKEN="${CUZZ_TOKEN:-$(cat /etc/cuzz.token 2>/dev/null)}"
+CUZZ_BIN="${CUZZ_BIN:-/usr/local/bin/cuzz}"
+[ -x "$CUZZ_BIN" ] || CUZZ_BIN=/root/bin/cuzz
+if [ -r "/etc/cuzz/${CUZZ_AGENT}.token" ]; then
+  CUZZ_TOKEN="$(cat "/etc/cuzz/${CUZZ_AGENT}.token")"
+  export CUZZ_TOKEN
+fi
 cuzz_say() {  # cuzz_say <channel> <kind> <content>
-  command -v cuzz >/dev/null 2>&1 || return 0
+  [ -x "$CUZZ_BIN" ] || return 0
   [ -n "${CUZZ_TOKEN:-}" ] || return 0
-  cuzz send --channel "$1" --kind "$2" --content "$3" >/dev/null 2>&1 || true
+  "$CUZZ_BIN" send --channel "$1" --kind "$2" --content "$3" >/dev/null 2>&1 || true
+  return 0
 }
 ```
 
-Mint one token per agent so the room shows who spoke:
+Each script then gets two lines near the top, after its log target is defined:
 
 ```sh
-cuzz token --agent merger    # -> /etc/cuzz.token on the merger's box/unit
-cuzz token --agent rebaser
-cuzz token --agent escalator
+CUZZ_AGENT=merger        # or rebaser / escalator / hitl-resume
+. /etc/am-cuzz.sh
 ```
 
-## am-merger-script.sh
-
-After a successful merge:
+Verify the helper survives the conditions it will actually meet — `set -euo
+pipefail` and an unreachable relay — before you touch a script:
 
 ```sh
-cuzz_say am-fleet action "MERGED #$pr, draining stack"
+bash -c 'set -euo pipefail; CUZZ_AGENT=merger; . /etc/am-cuzz.sh
+  cuzz_say am-fleet status "helper smoke test"
+  CUZZ_URL=http://127.0.0.1:1 cuzz_say am-fleet status "unreachable test"
+  echo STILL ALIVE'
 ```
+
+And verify it under systemd's environment, not your shell's — this is the check
+that catches the PATH problem:
+
+```sh
+systemd-run --wait --collect --quiet \
+  --property=Environment="PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  --property=Environment=HOME=/root \
+  /bin/bash -c 'set -euo pipefail; CUZZ_AGENT=merger; . /etc/am-cuzz.sh
+    cuzz_say am-fleet action "systemd-context check"'
+```
+
+## am-merger-script.sh — WIRED 2026-07-30
+
+Four additive lines. Note there are **two** merge sites: the strict-gate merge and
+the stack drain that follows it. Wiring only the first loses every stacked merge.
+
+```sh
+# after: log "  MERGED #$number"
+cuzz_say am-fleet action "MERGED #$number (${repo_name:-?}), pass $pass_level, ${total_lines} lines"
+
+# after: log "  stack drain: MERGED #$pr"
+cuzz_say am-fleet action "MERGED #$pr (${repo_name:-?}) via stack drain"
+
+# beside the label+comment in the pass-8 escalation branch, NOT instead of them
+cuzz_say hitl alert "PR #$number (${repo_name:-?}) labelled needs-human-review — strict gate failed 7+ passes, needs a decision"
+```
+
+Back up first (`cp am-merger-script.sh am-merger-script.sh.bak-before-cuzz`), then
+`bash -n` it, then run `systemctl start am-merger-script.service` and check
+`Result=success` rather than waiting blind for the timer.
 
 ## am-rebaser.sh
 
