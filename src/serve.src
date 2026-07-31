@@ -257,6 +257,17 @@ func utf8_from_code(cp) (s) {
     s = bytes_str(from_hex(h))
 }
 
+// srv_method treats HEAD as GET for routing (RFC 9110: HEAD is GET without the
+// body). A HEAD used to match no GET route, fall through to the auth gate and
+// answer 401 — including on /llms.txt, which the contract promises is open to
+// anyone. `curl -I` said 401 while `curl` said 200, so every link checker and
+// uptime probe was told the front door was locked. The body is dropped at the
+// write below.
+func srv_method(req) (m) {
+    m = req.method
+    if m == "HEAD" { m = "GET" }
+}
+
 func srv_handle(req, fd) (res, parked) {
     parked = 0
     res = srv_err("404 Not Found", "not_found", "no such route")
@@ -269,23 +280,23 @@ func srv_handle(req, fd) (res, parked) {
         return
     }
     // Unauthenticated discovery: what this is, and how to talk to it.
-    if req.method == "GET" && (p == "/health" || p == "/_health") {
+    if srv_method(req) == "GET" && (p == "/health" || p == "/_health") {
         res = srv_ok(status_json())
         return
     }
-    if req.method == "GET" && p == "/guide" {
+    if srv_method(req) == "GET" && p == "/guide" {
         res = response("200 OK", "application/json", guide_json())
         return
     }
-    if req.method == "GET" && p == "/llms.txt" {
+    if srv_method(req) == "GET" && p == "/llms.txt" {
         res = response("200 OK", "text/plain; charset=utf-8", llms_txt())
         return
     }
-    if req.method == "GET" && p == "/version" {
+    if srv_method(req) == "GET" && p == "/version" {
         res = srv_ok("{\"tool\":\"cuzz\",\"version\":\"" + cuzz_version() + "\"}")
         return
     }
-    if req.method == "GET" && (p == "/" || p == "") {
+    if srv_method(req) == "GET" && (p == "/" || p == "") {
         res = response("200 OK", "text/html; charset=utf-8", chat_html())
         return
     }
@@ -297,11 +308,11 @@ func srv_handle(req, fd) (res, parked) {
         return
     }
 
-    if req.method == "GET" && p == "/api/whoami" {
+    if srv_method(req) == "GET" && p == "/api/whoami" {
         res = srv_ok("{\"agent\":\"" + jesc_c(agent) + "\",\"role\":\"" + role + "\"}")
         return
     }
-    if req.method == "GET" && p == "/api/messages" {
+    if srv_method(req) == "GET" && p == "/api/messages" {
         res = h_messages_get(req, agent)
         return
     }
@@ -322,11 +333,11 @@ func srv_handle(req, fd) (res, parked) {
         res = srv_ok("{\"deleted\":\"" + jesc_c(mid) + "\"}")
         return
     }
-    if req.method == "GET" && p == "/api/agents" {
+    if srv_method(req) == "GET" && p == "/api/agents" {
         res = srv_ok(agent_names())
         return
     }
-    if req.method == "GET" && p == "/api/channels" {
+    if srv_method(req) == "GET" && p == "/api/channels" {
         res = srv_ok(chan_list())
         return
     }
@@ -346,7 +357,7 @@ func srv_handle(req, fd) (res, parked) {
     // alternative — a CLI that opens the grange directory to mint a token — is a
     // second writer under the running relay, which is precisely what the rest of
     // the design refuses to do.
-    if req.method == "GET" && p == "/api/tokens" {
+    if srv_method(req) == "GET" && p == "/api/tokens" {
         if role != "admin" {
             res = srv_err("403 Forbidden", "auth", "listing tokens needs an admin token")
             return
@@ -389,7 +400,7 @@ func srv_handle(req, fd) (res, parked) {
         res = srv_ok("{\"deleted\":\"" + jesc_c(name) + "\",\"messages_deleted\":" + str(n) + "}")
         return
     }
-    if req.method == "GET" && p == "/events" {
+    if srv_method(req) == "GET" && p == "/events" {
         channel := query(req, "channel")
         if len(channel) == 0 { channel = "am-fleet" }
         if valid_name(channel) == 0 {
@@ -457,9 +468,13 @@ func cmd_serve(args) {
                 req.remote = peer_addr(conn)
                 res, parked := srv_handle(req, conn)
                 if parked == 0 {
+                    // HEAD: Content-Length still describes what a GET would
+                    // return, so a client can size the fetch, but no body follows.
+                    hbody := res.body
+                    if req.method == "HEAD" { hbody = "" }
                     out := "HTTP/1.1 " + res.status + "\r\nContent-Type: " + res.ctype +
                         "\r\nContent-Length: " + str(len(res.body)) + "\r\n" + g_cors +
-                        "Connection: close\r\n\r\n" + res.body
+                        "Connection: close\r\n\r\n" + hbody
                     write(conn, out)
                     close(conn)
                 }
