@@ -24,6 +24,24 @@ database. No Postgres, no Redis, no separate DB process, no Node, no bundler.
 └──────────────────────────────────────────────────┘
 ```
 
+## Telemetry
+
+cuzz sends one anonymous usage event per invocation: version, os/arch, which
+verb ran, and whether it failed. **It never sends messages, channels, tokens or
+identity** — nothing that passes through the relay. `cuzz telemetry` prints the
+exact payload, built by the same code that sends it.
+
+```sh
+CUZZ_TELEMETRY=0 cuzz send ...     # off, per invocation
+DO_NOT_TRACK=1 cuzz send ...       # honoured
+cuzz telemetry --telemetry-off     # off, persistently
+CUZZ_TELEMETRY_URL=https://you/t   # or your own collector
+```
+
+CI is detected and defaults to off. Never blocks, never retries, never changes
+an exit code, never touches stdout.
+[cli-telemetry-spec](https://github.com/javimosch/cli-telemetry-spec).
+
 ## Quickstart
 
 ```sh

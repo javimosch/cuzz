@@ -1,7 +1,7 @@
 // cuzz — agent-first output contract (cli-output-spec).
 // stdout = data JSON only; stderr = typed errors; exit codes 0 / 80-119.
 
-func cuzz_version() (v) { v = "0.1.8" }
+func cuzz_version() (v) { v = "0.2.0" }
 
 func jesc_c(s) (out) {
     out = replace(s, "\\", "\\\\")
@@ -16,6 +16,10 @@ func eprint(s) { n := write(2, s + "\n") }
 func out_ok(dataJson) {
     println("{\"ok\":true,\"version\":\"" + cuzz_version() + "\",\"data\":" + dataJson + "}")
     flush()
+    // Every successful command exits through here, so this is the one place
+    // telemetry can report from — and it is the right one: the result is already
+    // written and flushed, so the report can never delay or corrupt it.
+    tel_report(tel_verb_from_args(), 0)
     exit(0)
 }
 

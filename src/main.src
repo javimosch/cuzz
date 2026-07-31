@@ -41,6 +41,17 @@ func main() {
     // parse_flags reads from index 1, so hand it the subcommand name at 0.
     sub := shift(argv, 1)
 
+    if cmd == "telemetry" {
+        if tel_hasflag(argv, "--telemetry-off") == 1 {
+            td, tok := tel_set(0)
+            println(td)
+            if tok == 0 { exit(90) }
+            exit(0)
+        }
+        if tel_hasflag(argv, "--telemetry-on") == 1 { td, tok := tel_set(1)  println(td)  exit(0) }
+        println(tel_status_json())
+        exit(0)
+    }
     if cmd == "version" { cmd_version() }
     if cmd == "guide" { cmd_guide(shift(argv, 2)) }
     if cmd == "help-json" { cmd_help_json() }
