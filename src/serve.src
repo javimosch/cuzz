@@ -94,7 +94,13 @@ func sse_tick() {
         ping := g_sse_ping[i]
         alive := 1
         if changed == 1 {
-            docs := items_docs(st_find_ordered("messages", msg_where(ch, "", ts, "", ""), 0, "ts", 0))
+            // Cap at 50 per tick: limit=0 (no cap) fetched ALL messages since
+            // the watermark on every 200ms loop iteration, and the machin
+            // runtime does not GC the string arrays from items_docs fast
+            // enough — 4.7GB RSS after 2 days. A client that is behind by
+            // more than 50 messages catches up over successive ticks (ts
+            // advances to the last one returned), so no data is lost.
+            docs := items_docs(st_find_ordered("messages", msg_where(ch, "", ts, "", ""), 50, "ts", 0))
             j := 0
             while j < len(docs) {
                 if write(fd, "data: " + docs[j] + "\n\n") < 0 { alive = 0  break }

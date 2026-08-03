@@ -14,6 +14,13 @@ EnvironmentFile=/etc/cuzz.env
 Restart=always
 RestartSec=5
 
+# Safety net: cuzz had a memory leak (4.7GB RSS after 2 days) caused by
+# unbounded SSE queries. The query is now capped at 50/tick, but the machin
+# runtime's GC is not aggressive, so a hard ceiling prevents OOM-killing the
+# host. 512MB is generous for a relay with <10k messages.
+MemoryMax=512M
+MemoryHigh=384M
+
 # The relay only ever needs its own data directory.
 NoNewPrivileges=true
 # PrivateTmp / ProtectSystem / ReadWritePaths are deliberately absent: they need
