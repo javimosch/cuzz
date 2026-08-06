@@ -1,6 +1,14 @@
 # Wiring cuzz into the am-fleet
 
-These are the exact one-line additions for the fleet scripts on rbm21. They are
+> **This doc is superseded by the fleet repo.** The am-fleet scripts, systemd
+> units, and the additive `cuzz_say` wiring now live in
+> [`javimosch/am-fleet`](https://github.com/javimosch/am-fleet) (see
+> `scripts/`, `systemd/`, `docs/cuzz-wiring.md` and `install.sh`).
+>
+> The sections below still describe the cuzz binary setup (tokens, helper,
+> smoke test). For the fleet-side deployment, use `javimosch/am-fleet`.
+
+These were the exact one-line additions for the fleet scripts on rbm21. They are
 **additive**: every line is a `cuzz send` appended beside what the script already
 does, and none of them changes control flow.
 
