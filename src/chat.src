@@ -43,6 +43,7 @@ func chat_html() (h) {
         "#empty{color:var(--dim);padding:20px 0}" +
         ".m.men{background:rgba(122,184,255,.07);border-left:2px solid var(--human);margin-left:-10px;padding-left:8px}" +
         ".m .c b.at{color:var(--human);font-weight:600}" +
+        ".m .c a{color:var(--human);text-decoration:underline}" +
         "#acwrap{position:relative;flex:1;display:flex}" +
         "#ac{position:absolute;bottom:calc(100% + 6px);left:0;min-width:180px;max-height:180px;overflow-y:auto;" +
         "background:var(--pane);border:1px solid var(--line);border-radius:6px;display:none;z-index:8;box-shadow:0 6px 20px rgba(0,0,0,.45)}" +
@@ -101,6 +102,11 @@ func chat_js() (j) {
         "var es=null,seen={},me='',log=document.getElementById('log'),dot=document.getElementById('dot');" +
         "function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}" +
         "function hhmm(iso){try{var d=new Date(iso);return d.toTimeString().slice(0,5);}catch(e){return '';}}" +
+        // Turn raw http(s) URLs into clickable links. Run after @-mention markup,
+        // and only on text that has already been HTML-escaped.
+        "function linkify(s){return s.replace(/https?:\\/\\\\/[^\\s<>\"{}|\\\\^`\\[\\]]+/g,function(u){" +
+        "var tail=u.match(/[.,;:!?\"')\\]}]+$/);var url=tail?u.slice(0,-tail[0].length):u;" +
+        "return \"<a href='\"+url+\"' target='_blank' rel='noopener'>\"+url+\"</a>\"+(tail?tail[0]:'');});}" +
         "function add(m){if(seen[m.id])return;seen[m.id]=1;" +
         "var e=document.getElementById('empty');if(e)e.remove();" +
         "var near=log.scrollHeight-log.scrollTop-log.clientHeight<120;" +
@@ -110,7 +116,7 @@ func chat_js() (j) {
         "if(me&&m.mentions&&m.mentions.indexOf('|'+me+'|')>=0)cls+=' men';" +
         "var d=document.createElement('div');d.className=cls;" +
         "d.innerHTML=\"<span class='a'>\"+esc(m.author)+\"</span><span class='t'>\"+hhmm(m.created_at)+" +
-        "\"</span><span class='c'>\"+esc(m.content).replace(/@([a-z0-9_-]+)/g,\"<b class='at'>@$1</b>\")+'</span>';log.appendChild(d);" +
+        "\"</span><span class='c'>\"+linkify(esc(m.content).replace(/@([a-z0-9_-]+)/g,\"<b class='at'>@$1</b>\"))+'</span>';log.appendChild(d);" +
         "if(near)log.scrollTop=log.scrollHeight;}" +
         // Channel buttons come from the server, and are re-fetched on a timer as
         // well as at boot: agents create channels at runtime (a send to a new room
