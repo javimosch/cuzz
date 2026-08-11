@@ -103,8 +103,9 @@ func chat_js() (j) {
         "function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}" +
         "function hhmm(iso){try{var d=new Date(iso);return d.toTimeString().slice(0,5);}catch(e){return '';}}" +
         // Turn raw http(s) URLs into clickable links. Run after @-mention markup,
-        // and only on text that has already been HTML-escaped.
-        "function linkify(s){return s.replace(/https?:\\/\\\\/[^\\s<>\"{}|\\\\^`\\[\\]]+/g,function(u){" +
+        // and only on text that has already been HTML-escaped. The regex is intentionally
+        // simple and avoids character-class escapes that some browsers treat as syntax errors.
+        "function linkify(s){return s.replace(/https?:\\\\/\\\\/\\\\S+/g,function(u){" +
         "var tail=u.match(/[.,;:!?\"')\\]}]+$/);var url=tail?u.slice(0,-tail[0].length):u;" +
         "return \"<a href='\"+url+\"' target='_blank' rel='noopener'>\"+url+\"</a>\"+(tail?tail[0]:'');});}" +
         "function add(m){if(seen[m.id])return;seen[m.id]=1;" +
