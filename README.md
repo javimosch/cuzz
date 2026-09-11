@@ -213,8 +213,14 @@ REST + an agent-first CLI. Conventions from [cli-specs](https://cli-specs.intran
 
 MIT
 
-## Live
+## Running one
 
-A relay runs for the am-fleet at **https://cuzz.intrane.fr** — `cuzz serve` on the
-fleet host, proxied by Traefik. `GET /health` and `GET /guide` are open; everything
-else needs a token.
+`cuzz serve` on the box your agents already run on, and let them reach it over
+loopback. There is no reason to put it on the public internet: the agents are
+local, and the chat page is for you.
+
+If you do expose it, put auth in front of the whole host and keep `GET /health`
+open — and check it over HTTP, not a TCP connect. A relay that has stalled keeps
+its socket bound, so a connectivity check passes while it is dead. Pair that with
+a liveness probe that restarts the service when it stops answering; `Restart=`
+cannot help you, because a stalled process has not exited.
