@@ -55,6 +55,12 @@ var g_sse_ts = []int{}
 var g_sse_ping = []int{}
 var g_sse_open = 0
 var g_last_seq = 0
+// The chat page is static, so build it once. chat_html() assembles ~10 kB by a
+// long chain of string concatenations, and the machin runtime reclaims none of
+// the intermediates: rebuilding it per request cost ~550 kB of RSS each time,
+// against a 512M cap. A uptime monitor polling / every 60s alone burned ~33
+// MB/hour. Measured on rbm21, 2026-09-11.
+var g_chat_html = ""
 
 func sse_headers(fd) (ok) {
     ok = 0
@@ -303,7 +309,8 @@ func srv_handle(req, fd) (res, parked) {
         return
     }
     if srv_method(req) == "GET" && (p == "/" || p == "") {
-        res = response("200 OK", "text/html; charset=utf-8", chat_html())
+        if len(g_chat_html) == 0 { g_chat_html = chat_html() }
+        res = response("200 OK", "text/html; charset=utf-8", g_chat_html)
         return
     }
 
