@@ -460,9 +460,30 @@ func cmd_serve(args) {
     }
     // 200ms accept timeout: the loop must come back regularly to feed the parked
     // SSE streams even when no request arrives.
-    socket_timeout(server, 200)
+    //
+    // But ONLY when a stream is actually parked. accept() leaks a little on
+    // every timeout, so spinning 5x a second with nobody connected cost ~46
+    // MB/hour of RSS for no work at all -- and this relay runs under a 512M cap.
+    // With no SSE client there is nothing to feed, so wait 5s instead and take
+    // 1/25th the iterations. This costs no latency: accept() returns as soon as
+    // a connection arrives, and the timeout only bounds the idle wait.
+    socket_timeout(server, 5000)
+    sse_n := 0
     reqs := 0
+    // Ticks since the WAL-chunk check last ran. The accept timeout is 200ms, so
+    // the loop comes round 5x a second even when idle; 1500 ticks is ~5 minutes.
+    wal_ticks := 0
     for {
+        // Re-arm the accept timeout whenever a stream parks or drops away.
+        n := len(g_sse_fd)
+        if n != sse_n {
+            sse_n = n
+            if n == 0 {
+                socket_timeout(server, 5000)
+            } else {
+                socket_timeout(server, 200)
+            }
+        }
         conn := accept(server)
         if conn >= 0 {
             socket_timeout(conn, 5000)
@@ -490,9 +511,27 @@ func cmd_serve(args) {
         sse_tick()
         // Auto-compact: an append-only relay accumulates WAL chunks, and every
         // restart replays them. Folding at 100 keeps startup flat.
-        if g_pend_recs == 0 && len(g_db) > 0 && g_cold == 0 {
-            if st_wal_chunks("messages") > 100 {
-                if st_use("messages") == 1 { gr_compact() }
+        //
+        // Rate-limited, and that is not a micro-optimisation. st_wal_chunks()
+        // calls list_dir(), which allocates one string per directory entry --
+        // and as the comment in sse_tick records, the machin runtime does not
+        // reclaim those string arrays. Running it on every 200ms tick leaked a
+        // whole directory listing 5x a second: ~113 MB/hour at idle with 78 WAL
+        // chunks present, which walked the relay into its 512M cgroup cap in
+        // about two hours. It then wedged in D state inside the OOM handler
+        // instead of dying, so Restart=always never fired and systemd went on
+        // reporting active (running) -- it sat dead like that from 2026-08-12
+        // to 2026-09-11, silently dropping every HITL proposal notification.
+        //
+        // Nothing needs this checked 5x a second: WAL chunks only accumulate on
+        // write, and the threshold is 100.
+        wal_ticks = wal_ticks + 1
+        if wal_ticks >= 1500 {
+            wal_ticks = 0
+            if g_pend_recs == 0 && len(g_db) > 0 && g_cold == 0 {
+                if st_wal_chunks("messages") > 100 {
+                    if st_use("messages") == 1 { gr_compact() }
+                }
             }
         }
     }
