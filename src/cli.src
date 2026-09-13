@@ -82,6 +82,8 @@ func cmd_whoami(args) {
 func cmd_prune(args) {
     fs := new_flags("prune")
     fs = flag_int(fs, "older-than", "", "30", "delete messages older than N days")
+    fs = flag_str(fs, "kind", "", "", "only this kind (status|message|action|alert|question|answer|presence)")
+    fs = flag_str(fs, "keep-author", "", "", "never delete messages by this author (repeat with commas)")
     fs = flag_int(fs, "max", "", "5000", "delete at most N per run — see the note on resumability")
     fs = flag_bool(fs, "yes", "y", "actually delete — without this it only counts")
     fs = flag_bool(fs, "local", "", "use the grange file directly")
@@ -98,7 +100,46 @@ func cmd_prune(args) {
     }
     // ids only: loading the documents would allocate the very memory this is
     // meant to hand back.
-    ids := items_ids(st_find("messages", "ts<" + str(cutoff), 0))
+    // Retention belongs per kind, not per database: a `status` line saying a
+    // rebase failed is worth days, a CEO decision is worth keeping. Run this
+    // once per kind with the window that kind deserves.
+    where := "ts<" + str(cutoff)
+    kindStr := flag_get(fs, "kind")
+    if len(kindStr) > 0 {
+        kn := kind_num(kindStr)
+        if kn <= 0 {
+            out_err(80, "input", "unknown kind: " + kindStr,
+                "one of status|message|action|alert|question|answer|presence")
+        }
+        where = where + ",kind=" + str(kn)
+    }
+    // Authors worth exempting, resolved to ids up front with their OWN query so
+    // this never reads the documents it is about to delete. Learned by deleting
+    // the only 18 human messages in the store: they were kind `message` and
+    // older than the window, and the window could not tell a person from a bot.
+    spare := make(map[string]int)
+    keepA := flag_get(fs, "keep-author")
+    if len(keepA) > 0 {
+        as := split(keepA, ",")
+        j := 0
+        while j < len(as) {
+            a := trim(as[j])
+            if len(a) > 0 {
+                kids := items_ids(st_find("messages", "author=" + a, 0))
+                x := 0
+                while x < len(kids) { spare[kids[x]] = 1  x = x + 1 }
+            }
+            j = j + 1
+        }
+    }
+
+    all := items_ids(st_find("messages", where, 0))
+    ids := []string{}
+    k := 0
+    while k < len(all) {
+        if has(spare, all[k]) == false { ids = append(ids, all[k]) }
+        k = k + 1
+    }
     n := len(ids)
     total := n
 
@@ -114,7 +155,7 @@ func cmd_prune(args) {
     if flag_on(fs, "yes") == false {
         out_ok("{\"would_delete\":" + str(total) + ",\"this_run\":" + str(n) +
             ",\"older_than_days\":" + str(days) +
-            ",\"dry_run\":true,\"hint\":\"re-run with --yes to delete\"}")
+            ",\"kind\":\"" + jesc_c(kindStr) + "\",\"dry_run\":true,\"hint\":\"re-run with --yes to delete\"}")
         return
     }
 
@@ -144,7 +185,7 @@ func cmd_prune(args) {
     if deleted > 0 { gr_compact() }
     left := total - deleted
     out_ok("{\"deleted\":" + str(deleted) + ",\"remaining\":" + str(left) +
-        ",\"older_than_days\":" + str(days) + "}")
+        ",\"older_than_days\":" + str(days) + ",\"kind\":\"" + jesc_c(kindStr) + "\"}")
 }
 
 func cmd_rm(args) {
