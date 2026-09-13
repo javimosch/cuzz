@@ -479,7 +479,12 @@ func cmd_serve(args) {
     reqs := 0
     // Ticks since the WAL-chunk check last ran. The accept timeout is 200ms, so
     // the loop comes round 5x a second even when idle; 1500 ticks is ~5 minutes.
-    wal_ticks := 0
+    // Wall-clock, not ticks. This was a tick counter sized for the 200ms accept
+    // timeout (1500 ticks ~ 5 min), and then the timeout became 5s when no SSE
+    // stream is parked -- which quietly made the same 1500 ticks ~2 HOURS, and
+    // the service recycles every 2h, so the fold effectively stopped: 242 WAL
+    // chunks had accumulated against a threshold of 100. Time is what was meant.
+    wal_next := now_ms() + 300000
     for {
         // Re-arm the accept timeout whenever a stream parks or drops away.
         n := len(g_sse_fd)
@@ -532,9 +537,8 @@ func cmd_serve(args) {
         //
         // Nothing needs this checked 5x a second: WAL chunks only accumulate on
         // write, and the threshold is 100.
-        wal_ticks = wal_ticks + 1
-        if wal_ticks >= 1500 {
-            wal_ticks = 0
+        if now_ms() >= wal_next {
+            wal_next = now_ms() + 300000
             if g_pend_recs == 0 && len(g_db) > 0 && g_cold == 0 {
                 if st_wal_chunks("messages") > 100 {
                     if st_use("messages") == 1 { gr_compact() }
