@@ -69,6 +69,70 @@ func cmd_whoami(args) {
 
 // cmd_rm deletes messages by id. Admin only at the relay; --yes because there is
 // no undo.
+// cmd_prune drops messages older than N days.
+//
+// cuzz keeps every message it has ever seen in the grange memtable, and the
+// memtable is the RSS: 50k messages held ~390 MB for 19 MB on disk. Nothing
+// expired them, so the baseline only ever grew, and the periodic restart that
+// bounds the per-request arena leak reloads the whole history each time.
+// Retention is the only lever that stops the floor rising.
+//
+// Defaults to a dry run. Deleting a fleet's history is not something to do by
+// typo, so the count comes first and --yes is required to act on it.
+func cmd_prune(args) {
+    fs := new_flags("prune")
+    fs = flag_int(fs, "older-than", "", "30", "delete messages older than N days")
+    fs = flag_bool(fs, "yes", "y", "actually delete — without this it only counts")
+    fs = flag_bool(fs, "local", "", "use the grange file directly")
+    fs = parse_flags(fs, args)
+
+    days := flag_int_val(fs, "older-than")
+    if days < 1 {
+        out_err(80, "input", "--older-than must be at least 1 day", "cuzz prune --older-than 30")
+    }
+    cutoff := now_ms() - days * 86400000
+
+    if st_use("messages") == 0 {
+        out_err(100, "integration", "cannot open the messages collection", "")
+    }
+    // ids only: loading the documents would allocate the very memory this is
+    // meant to hand back.
+    ids := items_ids(st_find("messages", "ts<" + str(cutoff), 0))
+    n := len(ids)
+
+    if flag_on(fs, "yes") == false {
+        out_ok("{\"would_delete\":" + str(n) + ",\"older_than_days\":" + str(days) +
+            ",\"dry_run\":true,\"hint\":\"re-run with --yes to delete\"}")
+        return
+    }
+
+    // Batched: st_del commits on every call, and 23k commits is not a prune, it
+    // is an afternoon -- but staging all 23k into one pending array and
+    // committing once killed the process outright, with no output and exit 0,
+    // which is exactly what the machin docs warn a runtime failure looks like.
+    // So commit every batch: the pending structures stay small and the work is
+    // resumable if it does die.
+    batch := 500
+    deleted := 0
+    staged := 0
+    i := 0
+    while i < n {
+        if gr_del(ids[i]) == 1 { deleted = deleted + 1 }
+        staged = staged + 1
+        if staged >= batch {
+            gr_commit()
+            staged = 0
+            write(2, "  pruned " + str(i + 1) + "/" + str(n) + "\n")
+        }
+        i = i + 1
+    }
+    if staged > 0 { gr_commit() }
+    // Fold the tombstones away, or the files keep the space and the next start
+    // replays every delete.
+    if deleted > 0 { gr_compact() }
+    out_ok("{\"deleted\":" + str(deleted) + ",\"older_than_days\":" + str(days) + "}")
+}
+
 func cmd_rm(args) {
     fs := new_flags("rm")
     fs = flag_bool(fs, "yes", "y", "confirm — deletion cannot be undone")

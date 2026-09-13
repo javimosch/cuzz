@@ -66,6 +66,7 @@ func main() {
     if cmd == "whoami" { cmd_whoami(sub) }
     if cmd == "rm" { cmd_rm(sub) }
     if cmd == "compact" { cmd_compact(sub) }
+    if cmd == "prune" { cmd_prune(sub) }
     if cmd == "serve" { cmd_serve(sub) }
     usage()
 }
