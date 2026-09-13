@@ -82,6 +82,7 @@ func cmd_whoami(args) {
 func cmd_prune(args) {
     fs := new_flags("prune")
     fs = flag_int(fs, "older-than", "", "30", "delete messages older than N days")
+    fs = flag_int(fs, "max", "", "5000", "delete at most N per run — see the note on resumability")
     fs = flag_bool(fs, "yes", "y", "actually delete — without this it only counts")
     fs = flag_bool(fs, "local", "", "use the grange file directly")
     fs = parse_flags(fs, args)
@@ -99,9 +100,20 @@ func cmd_prune(args) {
     // meant to hand back.
     ids := items_ids(st_find("messages", "ts<" + str(cutoff), 0))
     n := len(ids)
+    total := n
+
+    // Cap the work per process, and mean it. The machin arena never returns
+    // memory mid-process, so a long-running delete grows until the kernel takes
+    // it: 23k deletes in one run was SIGKILLed at about 12,500, losing the
+    // report though not the committed work. A bounded run in a fresh process
+    // has a fresh arena, and because the cutoff is re-queried each time, simply
+    // running it again finishes the job. Loop until would_delete reaches 0.
+    cap := flag_int_val(fs, "max")
+    if cap > 0 && n > cap { n = cap }
 
     if flag_on(fs, "yes") == false {
-        out_ok("{\"would_delete\":" + str(n) + ",\"older_than_days\":" + str(days) +
+        out_ok("{\"would_delete\":" + str(total) + ",\"this_run\":" + str(n) +
+            ",\"older_than_days\":" + str(days) +
             ",\"dry_run\":true,\"hint\":\"re-run with --yes to delete\"}")
         return
     }
@@ -130,7 +142,9 @@ func cmd_prune(args) {
     // Fold the tombstones away, or the files keep the space and the next start
     // replays every delete.
     if deleted > 0 { gr_compact() }
-    out_ok("{\"deleted\":" + str(deleted) + ",\"older_than_days\":" + str(days) + "}")
+    left := total - deleted
+    out_ok("{\"deleted\":" + str(deleted) + ",\"remaining\":" + str(left) +
+        ",\"older_than_days\":" + str(days) + "}")
 }
 
 func cmd_rm(args) {
